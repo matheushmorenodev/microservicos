@@ -1,59 +1,58 @@
-from django.shortcuts import render
+# core/views.py
 
+from django.db.models import Q
+from rest_framework import generics
 
+from .models import IOT, Department, Room
+from .serializers import DepartmentSerializer, IOTSerializer, RoomSerializer
 
+# Não precisamos mais de 'get_user_info_from_token' ou de uma classe base customizada aqui,
+# pois a configuração foi feita globalmente no settings.py.
 
 # --- Views de LEITURA ---
-#se necessario para guarita
-# class ListAllRoomsAPIView(generics.ListAPIView):
-#     queryset = Room.objects.all()
-#     serializer_class = RoomSerializer
-#     permission_classes = [HasRole]
-#     #allowed_roles = ['padrao','administrador','servidor','coordenador']
-    
-class ListALLRoomsAPIView(generics.ListAPIView):
-    queryset = Room.objects.all()
-    
-class ListRoomsWithAccessAPIView(generics.ListAPIView):
-    serializer_class = RoomSerializer
+
+class ListDepartamentsWithAccessAPIView(generics.ListAPIView):
+    """
+    Lista todos os Departamentos. O acesso a esta view já é protegido
+    pela configuração global.
+    """
+    serializer_class = DepartmentSerializer
+
     def get_queryset(self):
-        user_info = get_user_info_from_token(self.request)
-        if not user_info:
-            return Room.objects.none('Usuario nao encontrado')
-        
-        user_id = user_info.get('user_id')
-        if not user_id:
-            return Room.objects.none('Usuario nao encontrado')
-        return Room.objects.filter(
-            Q(admins__user_id=user_id) |
-            Q(users__user_id=user_id) |
-            Q(department__coordinators__user_id=user_id) |
-            Q(special_coordinators__user_id=user_id)
-        ).distinct()    
-        
-        
-        
-        
-# from django.db.models import Q
+        # O DRF já autenticou o usuário. O objeto `StatelessUser` está em `self.request.user`.
+        user = self.request.user
+        print(f"Listando departamentos para o usuário: {user.nome_usual} (ID: {user.id})")
 
-# # Supondo que você já tenha o `user_id` e o `user` carregado
-# user = User.objects.get(id=user_id)
+        # A lógica agora é apenas sobre o que retornar.
+        # Se você reativar as permissões, use `user.id`.
+        # Exemplo: return Department.objects.filter(coordinators__user_id=user.id)
+        return Department.objects.all()
 
-# # Lógica baseada no tipo de usuário
-# if user.role == 'aluno':
-#     # Se for aluno, ele pode ter permissões específicas
-#     rooms = Room.objects.filter(
-#         Q(users__user_id=user_id) |
-#         Q(department__coordinators__user_id=user_id)  # Exemplo de permissões para aluno
-#     ).distinct()
 
-# elif user.role == 'servidor':
-#     # Se for servidor, ele pode ter permissões mais amplas, por exemplo, admins
-#     rooms = Room.objects.filter(
-#         Q(admins__user_id=user_id) |
-#         Q(users__user_id=user_id) |
-#         Q(department__coordinators__user_id=user_id) |
-#         Q(special_coordinators__user_id=user_id)  # Exemplo de permissões para servidor
-#     ).distinct()
-        
-    
+class ListRoomsWithAccessAPIView(generics.ListAPIView):
+    """
+    Lista as Salas de um determinado Departamento.
+    """
+    serializer_class = RoomSerializer
+
+    def get_queryset(self):
+        # O usuário já está autenticado e disponível.
+        user = self.request.user
+        departamento_id = self.kwargs.get('departamento') # Pega o parâmetro da URL
+
+        # A lógica da view fica limpa e focada no seu objetivo.
+        return Room.objects.filter(department_id=departamento_id)
+
+
+class ListIOTWithAccessAPIView(generics.ListAPIView):
+    """
+    Lista os dispositivos IOT de uma determinada Sala.
+    """
+    serializer_class = IOTSerializer
+
+    def get_queryset(self):
+        # Acesso direto e seguro às informações do usuário.
+        user = self.request.user
+        sala_id = self.kwargs.get('sala') # Pega o parâmetro da URL
+
+        return IOT.objects.filter(room_id=sala_id)

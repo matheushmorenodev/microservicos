@@ -3,7 +3,7 @@ from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'sua-chave-super-secreta'  # troque por algo seguro em produção
+SECRET_KEY = 'django-insecure-ds99d^hlyc-j8*pucryv_af616*qi+8+eyytgm3&d3xp34z+xf'  # troque por algo seguro em produção
 
 DEBUG = True
 ALLOWED_HOSTS = []

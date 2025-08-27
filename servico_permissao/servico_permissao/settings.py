@@ -111,3 +111,16 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+REST_FRAMEWORK = {
+    # Define que TODAS as views da API usarão sua classe de autenticação por padrão.
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'resources.authentication.StatelessJWTAuthentication',  # <-- ATENÇÃO: MUDE 'core' SE NECESSÁRIO
+    ],
+    # Define que TODAS as views exigirão um token válido para serem acessadas.
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    # Você pode ter outras configurações aqui, como paginação, etc. Mantenha-as.
+}
