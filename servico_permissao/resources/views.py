@@ -1,15 +1,16 @@
-# core/views.py
 
 from django.db.models import Q
 from rest_framework import generics
 
 from rest_framework.exceptions import PermissionDenied
-from servico_permissao.resources.utils import get_user_info_from_token
+
+from resources.utils import get_or_create_user_from_token
+from profiles.models import ActorUser
 
 from .models import IOT, Department, Room
 from .serializers import DepartmentSerializer, IOTSerializer, RoomSerializer
 
-# Não precisamos mais de 'get_user_info_from_token' ou de uma classe base customizada aqui,
+# Não precisamos mais de 'get_or_create_user_from_token' ou de uma classe base customizada aqui,
 # pois a configuração foi feita globalmente no settings.py.
 
 # --- Views de LEITURA ---
@@ -22,15 +23,14 @@ class ListDepartamentsWithAccessAPIView(generics.ListAPIView):
     serializer_class = DepartmentSerializer
 
     def get_queryset(self):
-        # O DRF já autenticou o usuário. O objeto `StatelessUser` está em `self.request.user`.
-        # user = self.request.user
-        payload = get_user_info_from_token(self.request)
-        role = payload.get("role")
-        if role != "servidor":
-            raise PermissionDenied("Apenas servidores podem listar departamentos.")
-        #print(f"Listando departamentos para o usuário: {user.nome_usual} (ID: {user.id})")
-
-        return Department.objects.all()
+        user = get_or_create_user_from_token(self.request)
+        print(user.role)
+        if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
+            return Department.objects.all()
+        elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
+            return Department.objects.all()
+        else:
+            raise PermissionDenied("Usuario sem permissao.")
 
 
 class ListRoomsWithAccessAPIView(generics.ListAPIView):
@@ -40,16 +40,13 @@ class ListRoomsWithAccessAPIView(generics.ListAPIView):
     serializer_class = RoomSerializer
 
     def get_queryset(self):
-        # O usuário já está autenticado e disponível.
-        #user = self.request.user
-        #departamento_id = self.kwargs.get('departamento') # Pega o parâmetro da URL
-        payload = get_user_info_from_token(self.request)
-        role = payload.get("role")
-        departamento_id = self.kwargs.get("departamento")
-        if role in ["servidor", "padrao"]:
-            # A lógica da view fica limpa e focada no seu objetivo.
-            return Room.objects.filter(department_id=departamento_id)
-        raise PermissionDenied("Você não tem permissão para listar salas.")
+        user = get_or_create_user_from_token(self.request)
+        if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
+            return Room.objects.all()
+        elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
+            return Room.objects.all()
+        else:
+            raise PermissionDenied("Usuario sem permissao.")
 
 
 class ListIOTWithAccessAPIView(generics.ListAPIView):
@@ -59,13 +56,10 @@ class ListIOTWithAccessAPIView(generics.ListAPIView):
     serializer_class = IOTSerializer
 
     def get_queryset(self):
-        # Acesso direto e seguro às informações do usuário.
-        #user = self.request.user
-        #sala_id = self.kwargs.get('sala') # Pega o parâmetro da URL
-        payload = get_user_info_from_token(self.request)
-        role = payload.get("role")
-        sala_id = self.kwargs.get("sala")
-        
-        if role == "servidor":
-            return IOT.objects.filter(room_id=sala_id)
-        raise PermissionDenied("Apenas servidores podem listar dispositivos.")
+        user = get_or_create_user_from_token(self.request)
+        if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
+            return IOT.objects.all()
+        elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
+            return IOT.objects.all()
+        else:
+            raise PermissionDenied("Usuario sem permissao.")

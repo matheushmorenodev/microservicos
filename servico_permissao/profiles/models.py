@@ -2,10 +2,11 @@ from django.db import models
 
 class ActorUser(models.Model):
     class ActorUserRolesChoices(models.TextChoices):
-        USUARIO_PADRAO = 'padrao'
-        COORDENADOR = 'coordenador'
-        ADMINISTRADOR = 'administrador'
-        SERVIDOR = 'servidor'
+        ALUNO = 'Aluno'
+        #COORDENADOR = 'coordenador'
+        #ADMINISTRADOR = 'administrador'
+        SERVIDOR = 'Servidor'
+        PRESTADOR_SERVICO = 'PRESTADOR_SERVICO'
 
 
     user_id = models.IntegerField(unique=True) # ID do usuário vindo do Auth Service
@@ -13,19 +14,19 @@ class ActorUser(models.Model):
     role = models.CharField(
         max_length=20,
         choices=ActorUserRolesChoices.choices,
-        default=ActorUserRolesChoices.USUARIO_PADRAO
+        default=ActorUserRolesChoices.ALUNO
     )
 
-#COORDENADOR DE SALA
-class Coordinator(models.Model):
+#Tercerizado
+class PrestadorServico(models.Model):
     user_id = models.IntegerField(unique=True)
     def __str__(self):
-        return f'Coordenador - ID: {self.user_id}'
+        return f'Prestador Serviço - ID: {self.user_id}'
 #ALUNO
-class Common(models.Model):
+class Aluno(models.Model):
     user_id = models.IntegerField(unique=True)
     def __str__(self):
-        return f'Comum - ID: {self.user_id}'
+        return f'Aluno - ID: {self.user_id}'
     
 #SERVIDORES
 class Service(models.Model):
