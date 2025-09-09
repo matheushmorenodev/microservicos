@@ -1,15 +1,15 @@
 from rest_framework import serializers
 from .models import Department, Room, IOT
-from profiles.models import Coordinator, Admin, Common
+from profiles.models import PrestadorServico, Admin, Aluno
 
 from . import models
 
 
 # --- Serializers para LEITURA (Read) ---
 
-class CoordinatorProfileSerializer(serializers.ModelSerializer):
+class PrestadorServicoProfileSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Coordinator
+        model = PrestadorServico
         fields = ['id', 'user_id'] # Adicionado ID para facilitar a referência
 
 class AdminProfileSerializer(serializers.ModelSerializer):
@@ -17,9 +17,9 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         model = Admin
         fields = ['user_id']
 
-class CommonProfileSerializer(serializers.ModelSerializer):
+class AlunoProfileSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Common
+        model = Aluno
         fields = ['user_id']
 
 #Serializers dos locais
