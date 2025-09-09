@@ -8,6 +8,7 @@ class ActorUser(models.Model):
         SERVIDOR = 'Servidor'
         PRESTADOR_SERVICO = 'Prestador Servico'
 
+    
 
     user_id = models.IntegerField(unique=True) # ID do usuário vindo do Auth Service
     username = models.CharField(max_length=150, unique=True) # Username para referência
@@ -16,6 +17,13 @@ class ActorUser(models.Model):
         choices=ActorUserRolesChoices.choices,
         default=ActorUserRolesChoices.ALUNO
     )
+    @property
+    def is_authenticated(self):
+        """
+        Necessário para o Django/DRF reconhecer esse objeto como usuário válido.
+        Sempre retorna True, porque se chegamos aqui o token já foi validado.
+        """
+        return True
 
 #Tercerizado
 class PrestadorServico(models.Model):

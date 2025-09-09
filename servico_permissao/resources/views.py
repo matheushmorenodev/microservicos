@@ -1,66 +1,65 @@
-
-from django.db.models import Q
 from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
 
-from rest_framework.exceptions import PermissionDenied
+from .models import Department, Room, IOT
+from .serializers import DepartmentSerializer, RoomSerializer, IOTSerializer
+from .permissions import IsServidorOuPrestador, IsAlunoComPermissao
 
-from resources.utils import get_or_create_user_from_token
-from profiles.models import ActorUser
-
-from .models import IOT, Department, Room, UserPermissionRoom
-from .serializers import DepartmentSerializer, IOTSerializer, RoomSerializer
-
-# Não precisamos mais de 'get_or_create_user_from_token' ou de uma classe base customizada aqui,
-# pois a configuração foi feita globalmente no settings.py.
-
-# --- Views de LEITURA ---
 
 class ListDepartamentsWithAccessAPIView(generics.ListAPIView):
-    """
-    Lista todos os Departamentos. O acesso a esta view já é protegido
-    pela configuração global.
-    """
     serializer_class = DepartmentSerializer
+    permission_classes = [IsAuthenticated]  # garante que precisa estar logado
 
     def get_queryset(self):
-        user = get_or_create_user_from_token(self.request)
-        print(user.role)
-        if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
+        user = self.request.user
+
+        if user.role in (
+            "Servidor",
+            "Prestador Servico",
+        ):
             return Department.objects.all()
-        elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
-            return Department.objects.filter( room__userpermissionroom__user=user
-                                             ).distinct()
-        else:
-            raise PermissionDenied("Usuario sem permissao.")
+
+        if user.role == "Aluno":
+            return Department.objects.filter(
+                room__userpermissionroom__user=user
+            ).distinct()
+
+        return Department.objects.none()  # segurança extra
 
 
 class ListRoomsWithAccessAPIView(generics.ListAPIView):
-    """
-    Lista as Salas de um determinado Departamento.
-    """
     serializer_class = RoomSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = get_or_create_user_from_token(self.request)
-        if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
+        user = self.request.user
+
+        if user.role in (
+            "Servidor",
+            "Prestador Servico",
+        ):
             return Room.objects.all()
-        elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
+
+        if user.role == "Aluno":
             return Room.objects.filter(userpermissionroom__user=user)
-        else:
-            raise PermissionDenied("Usuario sem permissao.")
+
+        return Room.objects.none()
 
 
 class ListIOTWithAccessAPIView(generics.ListAPIView):
-    """
-    Lista os dispositivos IOT de uma determinada Sala.
-    """
     serializer_class = IOTSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = get_or_create_user_from_token(self.request)
-        if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
+        user = self.request.user
+
+        if user.role in (
+            "Servidor",
+            "Prestador Servico",
+        ):
             return IOT.objects.all()
-        elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
-            IOT.objects.filter(room__userpermissionroom__user=user)
-        else:
-            raise PermissionDenied("Usuario sem permissao.")
+
+        if user.role == "Aluno":
+            return IOT.objects.filter(room__userpermissionroom__user=user)
+
+        return IOT.objects.none()
