@@ -7,7 +7,7 @@ from rest_framework.exceptions import PermissionDenied
 from resources.utils import get_or_create_user_from_token
 from profiles.models import ActorUser
 
-from .models import IOT, Department, Room
+from .models import IOT, Department, Room, UserPermissionRoom
 from .serializers import DepartmentSerializer, IOTSerializer, RoomSerializer
 
 # Não precisamos mais de 'get_or_create_user_from_token' ou de uma classe base customizada aqui,
@@ -28,7 +28,8 @@ class ListDepartamentsWithAccessAPIView(generics.ListAPIView):
         if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
             return Department.objects.all()
         elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
-            return Department.objects.all()
+            return Department.objects.filter( room__userpermissionroom__user=user
+                                             ).distinct()
         else:
             raise PermissionDenied("Usuario sem permissao.")
 
@@ -44,7 +45,7 @@ class ListRoomsWithAccessAPIView(generics.ListAPIView):
         if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
             return Room.objects.all()
         elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
-            return Room.objects.all()
+            return Room.objects.filter(userpermissionroom__user=user)
         else:
             raise PermissionDenied("Usuario sem permissao.")
 
@@ -60,6 +61,6 @@ class ListIOTWithAccessAPIView(generics.ListAPIView):
         if user.role == ActorUser.ActorUserRolesChoices.SERVIDOR or user.role == ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO :
             return IOT.objects.all()
         elif user.role == ActorUser.ActorUserRolesChoices.ALUNO:
-            return IOT.objects.all()
+            IOT.objects.filter(room__userpermissionroom__user=user)
         else:
             raise PermissionDenied("Usuario sem permissao.")

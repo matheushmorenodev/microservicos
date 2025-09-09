@@ -6,7 +6,7 @@ class ActorUser(models.Model):
         #COORDENADOR = 'coordenador'
         #ADMINISTRADOR = 'administrador'
         SERVIDOR = 'Servidor'
-        PRESTADOR_SERVICO = 'PRESTADOR_SERVICO'
+        PRESTADOR_SERVICO = 'Prestador Servico'
 
 
     user_id = models.IntegerField(unique=True) # ID do usuário vindo do Auth Service

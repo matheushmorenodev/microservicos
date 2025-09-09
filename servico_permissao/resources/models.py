@@ -1,5 +1,5 @@
 from django.db import models
-#from profiles.models import Common, Coordinator, Service, Admin 
+from profiles.models import ActorUser 
 
 
 class Department(models.Model):
@@ -23,3 +23,10 @@ class IOT(models.Model):
     room = models.ForeignKey(Room, related_name='iot_objects', on_delete=models.RESTRICT)
     def __str__(self):
         return f'{self.room} - {"Conectado" if self.status else "Aguardando Conexão"}'
+    
+class UserPermissionRoom(models.Model):
+    user = models.ForeignKey(ActorUser, on_delete=models.CASCADE)
+    room = models.ForeignKey(Room, on_delete=models.CASCADE)
+    def __str__(self):
+        return f"{self.user} - {self.room}"
+    
