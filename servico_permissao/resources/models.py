@@ -1,5 +1,6 @@
 from django.db import models
 from profiles.models import ActorUser 
+from django.utils import timezone
 
 
 class Department(models.Model):
@@ -29,4 +30,15 @@ class UserPermissionRoom(models.Model):
     room = models.ForeignKey(Room, on_delete=models.CASCADE)
     def __str__(self):
         return f"{self.user} - {self.room}"
-    
+
+#Habilitando um servidor a gerar/visualizar um log 
+class ServidorViewLog(models.Model):
+    user = models.ForeignKey(
+        ActorUser,
+        on_delete=models.CASCADE,
+        limit_choices_to={'role': ActorUser.ActorUserRolesChoices.SERVIDOR},
+        )
+    room = models.ForeignKey(Room, related_name='log_sala', on_delete=models.RESTRICT)
+
+    def __str__(self):
+        return f"{self.user} -> {self.room}"

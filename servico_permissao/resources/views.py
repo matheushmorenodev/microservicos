@@ -2,9 +2,9 @@ from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Department, Room, IOT
-from .serializers import DepartmentSerializer, RoomSerializer, IOTSerializer
+from .serializers import DepartmentSerializer, RoomSerializer, IOTSerializer, ServidorViewLog
 from .permissions import IsServidorOuPrestador, IsAlunoComPermissao
-
+from rest_framework.response import Response
 
 class ListDepartamentsWithAccessAPIView(generics.ListAPIView):
     serializer_class = DepartmentSerializer
@@ -46,6 +46,7 @@ class ListRoomsWithAccessAPIView(generics.ListAPIView):
         return Room.objects.none()
 
 
+
 class ListIOTWithAccessAPIView(generics.ListAPIView):
     serializer_class = IOTSerializer
     permission_classes = [IsAuthenticated]
@@ -53,13 +54,29 @@ class ListIOTWithAccessAPIView(generics.ListAPIView):
     def get_queryset(self):
         user = self.request.user
 
-        if user.role in (
-            "Servidor",
-            "Prestador Servico",
-        ):
+        if user.role in ("Servidor", "Prestador Servico"):
             return IOT.objects.all()
 
         if user.role == "Aluno":
             return IOT.objects.filter(room__userpermissionroom__user=user)
 
         return IOT.objects.none()
+
+    def list(self, request, *args, **kwargs):
+        """
+        Sobrescreve a resposta para incluir o campo 'servidor' no topo.
+        """
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+
+        user = request.user
+        servidor_has_access = False
+
+        if user.role == "Servidor":
+            # Verifica se o servidor tem algum vínculo em ServidorViewLog
+            servidor_has_access = ServidorViewLog.objects.filter(user=user).exists()
+
+        return Response({
+            "results": serializer.data,
+            "owner": servidor_has_access
+        })

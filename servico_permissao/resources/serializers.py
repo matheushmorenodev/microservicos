@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import Department, Room, IOT
 from profiles.models import PrestadorServico, Admin, Aluno
-
+from .models import ServidorViewLog
 from . import models
 
 
@@ -38,9 +38,14 @@ class RoomSerializer(serializers.ModelSerializer):
 
 #IOT
 class IOTSerializer(serializers.ModelSerializer):
-    room = serializers.StringRelatedField()  # mostra __str__ do Room
-    status = serializers.CharField()         # pode restringir validação se quiser
+    room = serializers.StringRelatedField()
 
     class Meta:
         model = IOT
-        fields = ['id', 'room', 'status']
+        fields = '__all__'
+
+
+class ServidorViewLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ServidorViewLog
+        fields = '__all__'

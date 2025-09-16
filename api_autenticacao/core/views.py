@@ -38,8 +38,8 @@ class LoginView(APIView):
         refresh = RefreshToken()
         refresh['id'] = user.get('id')
         refresh['username'] = username
-        refresh['nome_usual'] = user.get('nome_usual')
-        #refresh['tipo_vinculo'] = 'Prestador Servico'
+        #refresh['nome_usual'] = user.get('nome_usual')
+        refresh['tipo_vinculo'] = 'Servidor'
         refresh['tipo_vinculo'] = user.get('tipo_vinculo')
         refresh['url_foto_75x100'] = user.get('url_foto_75x100')
         refresh['url_foto_150x200'] = user.get('url_foto_150x200')
@@ -48,8 +48,8 @@ class LoginView(APIView):
         access['id'] = user.get('id')
         access['username'] = username
         access['nome_usual'] = user.get('nome_usual')
-        #access['tipo_vinculo'] = 'Prestador Servico'
-        access['tipo_vinculo'] = user.get('tipo_vinculo')
+        access['tipo_vinculo'] = 'Servidor'
+        #access['tipo_vinculo'] = user.get('tipo_vinculo')
         access['url_foto_75x100'] = user.get('url_foto_75x100')
         access['url_foto_150x200'] = user.get('url_foto_150x200')
 

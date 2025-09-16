@@ -3,12 +3,9 @@ from django.db import models
 class ActorUser(models.Model):
     class ActorUserRolesChoices(models.TextChoices):
         ALUNO = 'Aluno'
-        #COORDENADOR = 'coordenador'
-        #ADMINISTRADOR = 'administrador'
         SERVIDOR = 'Servidor'
         PRESTADOR_SERVICO = 'Prestador Servico'
 
-    
 
     user_id = models.IntegerField(unique=True) # ID do usuário vindo do Auth Service
     username = models.CharField(max_length=150, unique=True) # Username para referência
