@@ -1,46 +1,77 @@
+# models.py
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 class ActorUser(models.Model):
-    class ActorUserRolesChoices(models.TextChoices):
-        ALUNO = 'Aluno'
-        SERVIDOR = 'Servidor'
-        PRESTADOR_SERVICO = 'Prestador Servico'
+    """
+    Representa um usuário sincronizado a partir de um serviço de autenticação externo.
 
+    Este modelo atua como uma cópia local ("ator") dos dados essenciais do usuário
+    para estabelecer relações e permissões dentro deste microserviço, sem
+    armazenar credenciais sensíveis.
+    """
 
-    user_id = models.IntegerField(unique=True) # ID do usuário vindo do Auth Service
-    username = models.CharField(max_length=150, unique=True) # Username para referência
-    role = models.CharField(
-        max_length=20,
-        choices=ActorUserRolesChoices.choices,
-        default=ActorUserRolesChoices.ALUNO
+    class Role(models.TextChoices):
+        """Define os papéis (níveis de acesso) que um usuário pode ter no sistema."""
+        ALUNO = 'ALUNO', _('Aluno')
+        SERVIDOR = 'SERVIDOR', _('Servidor')
+        PRESTADOR_SERVICO = 'PRESTADOR_SERVICO', _('Prestador de Serviço')
+        ADMIN = 'ADMIN', _('Admin')
+        # Adicionar novos papéis aqui é simples e centralizado.
+
+    # O user_id do serviço de autenticação é a chave primária natural neste contexto.
+    # Isso evita a criação de uma coluna 'id' extra e otimiza as buscas.
+    user_id = models.PositiveIntegerField(
+        primary_key=True,
+        help_text=_("ID único do usuário vindo do serviço de autenticação.")
     )
+
+    username = models.CharField(
+        _("nome de usuário"),
+        max_length=150,
+        unique=True,
+        help_text=_("Nome de usuário para referência e exibição.")
+    )
+
+    role = models.CharField(
+        _("papel"),
+        max_length=20,
+        choices=Role.choices,
+        default=Role.ALUNO,
+        db_index=True, # Adicionar um índice melhora a performance de filtros por 'role'.
+        help_text=_("Define o nível de permissão do usuário no sistema.")
+    )
+
+    # A propriedade is_authenticated é uma excelente forma de integrar
+    # este modelo customizado com os sistemas de permissão do Django/DRF.
     @property
-    def is_authenticated(self):
+    def is_authenticated(self) -> bool:
         """
-        Necessário para o Django/DRF reconhecer esse objeto como usuário válido.
-        Sempre retorna True, porque se chegamos aqui o token já foi validado.
+        Sempre retorna True, pois a existência deste objeto implica que o
+        usuário foi validado via token pelo serviço de autenticação.
         """
         return True
 
-#Tercerizado
-class PrestadorServico(models.Model):
-    user_id = models.IntegerField(unique=True)
     def __str__(self):
-        return f'Prestador Serviço - ID: {self.user_id}'
-#ALUNO
-class Aluno(models.Model):
-    user_id = models.IntegerField(unique=True)
-    def __str__(self):
-        return f'Aluno - ID: {self.user_id}'
-    
-#SERVIDORES
-class Service(models.Model):
-    user_id = models.IntegerField(unique=True)
-    def __str__(self):
-        return f'Servidor - ID: {self.user_id}'
-    
-#PERFIL que faremos para nti
-class Admin(models.Model):
-    user_id = models.IntegerField(unique=True)
-    def __str__(self):
-        return f'Admin - ID: {self.user_id}'
+        # Uma representação em string mais informativa é útil no Django Admin.
+        return f"{self.username} ({self.get_role_display()})"
+
+    class Meta:
+        verbose_name = _("Usuário Ator")
+        verbose_name_plural = _("Usuários Atores")
+
+
+# --------------------------------------------------------------------------
+# Os modelos PrestadorServico, Aluno, Service e Admin foram REMOVIDOS.
+# Eles são redundantes, pois o modelo ActorUser já armazena essa informação
+# de forma mais segura e eficiente no campo 'role'.
+#
+# Para verificar se um usuário é um aluno, por exemplo, basta fazer:
+#
+# if user.role == ActorUser.Role.ALUNO:
+#     # ... fazer algo ...
+#
+# Para buscar todos os servidores:
+#
+# servidores = ActorUser.objects.filter(role=ActorUser.Role.SERVIDOR)
+# --------------------------------------------------------------------------
