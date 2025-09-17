@@ -1,31 +1,37 @@
+# permissions.py
 from rest_framework.permissions import BasePermission
-from rest_framework.exceptions import PermissionDenied
-from profiles.models import ActorUser
+from .constants import UserRoles # ✨ Usando constantes
 
-
-class IsServidorOuPrestador(BasePermission):
-    """
-    Permite acesso apenas a usuários com vínculo de Servidor ou Prestador.
-    """
-
+class HasDepartmentAccess(BasePermission):
+    """Permite acesso se o usuário for Servidor/Prestador ou um Aluno com permissão."""
     def has_permission(self, request, view):
-        if request.user and request.user.is_authenticated:
-            if request.user.tipo_vinculo in (
-                ActorUser.ActorUserRolesChoices.SERVIDOR,
-                ActorUser.ActorUserRolesChoices.PRESTADOR_SERVICO,
-            ):
-                return True
-        raise PermissionDenied("Apenas Servidores e Prestadores podem acessar.")
+        # Apenas estar autenticado já é o suficiente, o filtro do queryset fará o resto.
+        return request.user and request.user.is_authenticated
 
-
-class IsAlunoComPermissao(BasePermission):
-    """
-    Permite acesso a alunos, mas apenas se eles tiverem permissão em salas/departamentos.
-    O filtro real fica no queryset da view.
-    """
-
+class HasRoomAccess(BasePermission):
+    """Verifica se o usuário tem permissão para acessar salas de um departamento específico."""
     def has_permission(self, request, view):
-        if request.user and request.user.is_authenticated:
-            if request.user.tipo_vinculo == ActorUser.ActorUserRolesChoices.ALUNO:
-                return True
-        return False
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+
+        if user.role in (UserRoles.SERVIDOR, UserRoles.PRESTADOR_SERVICO):
+            return True
+
+        # Para alunos, verificamos se ele tem permissão em alguma sala DAQUELE departamento
+        department_pk = view.kwargs.get('department_pk')
+        return user.userpermissionroom_set.filter(room__department_id=department_pk).exists()
+
+class HasIOTAccess(BasePermission):
+    """Verifica se o usuário tem permissão para acessar IOTs de uma sala específica."""
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+
+        if user.role in (UserRoles.SERVIDOR, UserRoles.PRESTADOR_SERVICO):
+            return True
+
+        # Para alunos, verificamos se ele tem permissão NAQUELA sala
+        room_pk = view.kwargs.get('room_pk')
+        return user.userpermissionroom_set.filter(room_id=room_pk).exists()

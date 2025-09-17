@@ -1,14 +1,15 @@
+# urls.py
 from django.urls import path
 from .views import (
-    ListRoomsWithAccessAPIView,
-    ListDepartamentsWithAccessAPIView,
-    ListIOTWithAccessAPIView,
+    ListDepartmentsAPIView,
+    ListRoomsAPIView,
+    ListIOTsAPIView,
 )
 
+#app_name = 'core' # Boa prática: adicionar um namespace
 
 urlpatterns = [
-    
-    path('listar-todos-departamentos/', ListDepartamentsWithAccessAPIView.as_view(), name='listar_meus_departamentos'),
-    path('listar-todas-salas/<int:departamento>/', ListRoomsWithAccessAPIView.as_view(), name='listar_minhas_salas'),
-    path('listar-todos-dispositivos/<int:sala>/', ListIOTWithAccessAPIView.as_view(), name='listar_meus_dispositivos'),
+    path('departments/', ListDepartmentsAPIView.as_view(), name='department-list'),
+    path('departments/<int:department_pk>/rooms/', ListRoomsAPIView.as_view(), name='room-list'),
+    path('rooms/<int:room_pk>/iots/', ListIOTsAPIView.as_view(), name='iot-list'),
 ]

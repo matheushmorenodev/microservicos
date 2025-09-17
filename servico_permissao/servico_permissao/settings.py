@@ -116,7 +116,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     # Define que TODAS as views da API usarão sua classe de autenticação por padrão.
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'resources.authentication.ValidateJWTAuthentication',  
+        'resources.authentication.JWTAuthentication',  
     ],
     # Define que TODAS as views exigirão um token válido para serem acessadas.
     'DEFAULT_PERMISSION_CLASSES': [

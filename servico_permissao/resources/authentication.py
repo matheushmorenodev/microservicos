@@ -4,52 +4,46 @@ from rest_framework import exceptions
 import jwt
 from django.conf import settings
 from profiles.models import ActorUser
+from .constants import UserRoles # ✨ Usando constantes
 
-class ValidateJWTAuthentication(BaseAuthentication):
+class JWTAuthentication(BaseAuthentication):
     """
-    Valida token JWT vindo de outro serviço (auth-service) e cria/sincroniza o ActorUser.
+    Valida um token JWT, busca ou sincroniza o usuário local (ActorUser)
+    e o anexa ao objeto 'request'.
     """
-
     def authenticate(self, request):
         auth_header = request.headers.get("Authorization")
         if not auth_header:
-            return None  # DRF considera como não autenticado
+            return None # Nenhuma tentativa de autenticação
 
-        parts = auth_header.split()
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            raise exceptions.AuthenticationFailed("Cabeçalho Authorization inválido")
-
-        token = parts[1]
+        try:
+            # Validação do formato 'Bearer <token>'
+            prefix, token = auth_header.split()
+            if prefix.lower() != "bearer":
+                raise exceptions.AuthenticationFailed("O cabeçalho Authorization deve começar com 'Bearer'")
+        except (ValueError, TypeError):
+            raise exceptions.AuthenticationFailed("Cabeçalho Authorization mal formatado.")
 
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         except jwt.ExpiredSignatureError:
-            raise exceptions.AuthenticationFailed("Token expirado")
+            raise exceptions.AuthenticationFailed("Token expirado.")
         except jwt.InvalidTokenError:
-            raise exceptions.AuthenticationFailed("Token inválido")
+            raise exceptions.AuthenticationFailed("Token inválido.")
 
         user_id = payload.get("id")
         username = payload.get("username")
-        tipo_vinculo = payload.get("tipo_vinculo", ActorUser.ActorUserRolesChoices.ALUNO)
-
+        
         if not user_id or not username:
-            raise exceptions.AuthenticationFailed("Token sem informações de usuário suficientes")
+            raise exceptions.AuthenticationFailed("Payload do token incompleto.")
 
-        # Cria ou sincroniza usuário no banco
-        actor_user, created = ActorUser.objects.get_or_create(
+        # Usa update_or_create para simplificar e garantir atomicidade
+        user, created = ActorUser.objects.update_or_create(
             user_id=user_id,
-            defaults={"username": username, "tipo_vinculo": tipo_vinculo},
+            defaults={
+                "username": username,
+                "role": payload.get("tipo_vinculo", UserRoles.ALUNO), # Usando constante
+            },
         )
 
-        if not created:
-            changed = False
-            if actor_user.username != username:
-                actor_user.username = username
-                changed = True
-            if actor_user.role != tipo_vinculo:
-                actor_user.role = tipo_vinculo
-                changed = True
-            if changed:
-                actor_user.save()
-
-        return (actor_user, None)
+        return (user, None) # Sucesso na autenticação
