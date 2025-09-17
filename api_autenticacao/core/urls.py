@@ -1,10 +1,11 @@
+# core/urls.py
 from django.urls import path
-from .views import LoginView, PerfilView, CustomTokenRefreshView
+from .views import LoginAPIView, ProfileAPIView, CustomTokenRefreshView
 from rest_framework_simplejwt.views import TokenVerifyView
 
 urlpatterns = [
-    path('login/', LoginView.as_view()),
-    path('perfil/', PerfilView.as_view()),
-    path('token/verify/', TokenVerifyView.as_view()),
-    path('token/refresh/', CustomTokenRefreshView.as_view()),
+    path('login/', LoginAPIView.as_view(), name='auth_login'),
+    path('profile/', ProfileAPIView.as_view(), name='auth_profile'),
+    path('token/verify/', TokenVerifyView.as_view(), name='token_verify'),
+    path('token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
 ]

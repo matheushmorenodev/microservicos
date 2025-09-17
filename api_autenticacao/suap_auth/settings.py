@@ -1,9 +1,22 @@
 from pathlib import Path
 from datetime import timedelta
+import os
+from dotenv import load_dotenv
+
+# Carrega variáveis de ambiente de um arquivo .env
+load_dotenv() 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-ds99d^hlyc-j8*pucryv_af616*qi+8+eyytgm3&d3xp34z+xf'  # troque por algo seguro em produção
+# ❌ NUNCA deixe a chave secreta no código.
+# ✅ Busque de uma variável de ambiente.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'default-insecure-key-for-dev')
+
+# ✅ Centralize URLs externas aqui para fácil manutenção.
+SUAP_BASE_URL = 'https://suap.ifsuldeminas.edu.br/api'
+SUAP_TOKEN_URL = f'{SUAP_BASE_URL}/token/pair'
+SUAP_USER_DATA_URL = f'{SUAP_BASE_URL}/rh/meus-dados/'
+
 
 DEBUG = True
 ALLOWED_HOSTS = []
@@ -26,15 +39,14 @@ ROOT_URLCONF = 'suap_auth.urls'
 # Configuração mínima para DRF + JWT customizado
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'core.authentication.StatelessJWTAuthentication',
+        'core.authentication.CustomJWTAuthentication',
     ),
 }
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
-    'REFRESH_TOKEN_LIFETIME': timedelta(hours=12),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
