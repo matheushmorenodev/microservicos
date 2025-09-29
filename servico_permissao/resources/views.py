@@ -34,10 +34,10 @@ class AccessFilteredQuerysetMixin:
         return model.objects.none() # Princípio de negação por padrão
 
 
-class ListDepartmentsAPIView(AccessFilteredQuerysetMixin, generics.ListAPIView):
-    """Lista os departamentos que o usuário logado tem acesso."""
-    serializer_class = DepartmentSerializer
-    permission_classes = [IsAuthenticated, HasDepartmentAccess] # Permissão mais específica
+# class ListDepartmentsAPIView(AccessFilteredQuerysetMixin, generics.ListAPIView):
+#     """Lista os departamentos que o usuário logado tem acesso."""
+#     serializer_class = DepartmentSerializer
+#     permission_classes = [IsAuthenticated, HasDepartmentAccess] # Permissão mais específica
 
 
 class ListRoomsAPIView(AccessFilteredQuerysetMixin, generics.ListAPIView):

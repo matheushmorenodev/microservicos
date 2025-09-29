@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # O "Carteiro"
+  rabbitmq:
+    image: rabbitmq:3.9-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672" # Interface Web de Gerenciamento
+    networks:
+      - app-network
+
+  # Backend de resultados para o Celery
+  redis:
+    image: redis:alpine
+    container_name: redis
+    networks:
+      - app-network
+  # NOVO SERVIÇO DE AUTENTICAÇÃO
+  auth_service:
+    build: ./api_autenticacao
+    container_name: auth_service
+    command: python manage.py runserver 0.0.0.0:8001
+    env_file:
+      - .env
+    volumes:
+      - ./api_autenticacao:/app
+    ports:
+      - "8001:8001"
+    networks:
+      - app-network
+
+  # O "Trabalhador" que executa a lógica de permissão
+  permission_worker:
+    build: ./servico_permissao
+    container_name: permission_worker
+    env_file:
+      - .env
+    volumes:
+      - ./servico_permissao:/app
+    depends_on:
+      - rabbitmq
+      - redis
+    networks:
+      - app-network
+
+  # A "Ponte Tradutora" que recebe requisições HTTP
+  middleware:
+    build: ./middleware
+    container_name: middleware
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./middleware:/app
+    depends_on:
+      - rabbitmq
+      - permission_worker
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

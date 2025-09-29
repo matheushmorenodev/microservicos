@@ -59,19 +59,3 @@ class ActorUser(models.Model):
     class Meta:
         verbose_name = _("Usuário Ator")
         verbose_name_plural = _("Usuários Atores")
-
-
-# --------------------------------------------------------------------------
-# Os modelos PrestadorServico, Aluno, Service e Admin foram REMOVIDOS.
-# Eles são redundantes, pois o modelo ActorUser já armazena essa informação
-# de forma mais segura e eficiente no campo 'role'.
-#
-# Para verificar se um usuário é um aluno, por exemplo, basta fazer:
-#
-# if user.role == ActorUser.Role.ALUNO:
-#     # ... fazer algo ...
-#
-# Para buscar todos os servidores:
-#
-# servidores = ActorUser.objects.filter(role=ActorUser.Role.SERVIDOR)
-# --------------------------------------------------------------------------
