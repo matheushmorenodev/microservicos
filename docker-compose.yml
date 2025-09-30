@@ -1,23 +1,40 @@
-version: '3.8'
+# A linha 'version' não é mais necessária, pode remover se quiser.
+# version: '3.8'
 
 services:
-  # O "Carteiro"
+  # ------ INFRAESTRUTURA ------
+
+  # O BLOCO QUE PROVAVELMENTE ESTÁ FALTANDO
+  postgres_db:
+    image: postgres:13-alpine
+    container_name: postgres_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=permissions_db
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+
   rabbitmq:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
     ports:
       - "5672:5672"
-      - "15672:15672" # Interface Web de Gerenciamento
+      - "15672:15672"
     networks:
       - app-network
 
-  # Backend de resultados para o Celery
   redis:
     image: redis:alpine
     container_name: redis
     networks:
       - app-network
-  # NOVO SERVIÇO DE AUTENTICAÇÃO
+
+  # ------ SERVIÇOS DA APLICAÇÃO ------
   auth_service:
     build: ./api_autenticacao
     container_name: auth_service
@@ -31,21 +48,48 @@ services:
     networks:
       - app-network
 
-  # O "Trabalhador" que executa a lógica de permissão
   permission_worker:
     build: ./servico_permissao
     container_name: permission_worker
+    command: sh -c "python manage.py migrate && celery -A servico_permissao.celery worker --loglevel=info"
     env_file:
       - .env
     volumes:
       - ./servico_permissao:/app
+    environment:
+      - DB_NAME=permissions_db
+      - DB_USER=myuser
+      - DB_PASS=mypassword
+      - DB_HOST=postgres_db
+      - DB_PORT=5432
     depends_on:
+      - postgres_db
       - rabbitmq
       - redis
     networks:
       - app-network
 
-  # A "Ponte Tradutora" que recebe requisições HTTP
+  permission_admin:
+    build: ./servico_permissao
+    container_name: permission_admin
+    command: python manage.py runserver 0.0.0.0:8003
+    env_file:
+      - .env
+    volumes:
+      - ./servico_permissao:/app
+    ports:
+      - "8003:8003"
+    environment:
+      - DB_NAME=permissions_db
+      - DB_USER=myuser
+      - DB_PASS=mypassword
+      - DB_HOST=postgres_db
+      - DB_PORT=5432
+    depends_on:
+      - postgres_db
+    networks:
+      - app-network
+
   middleware:
     build: ./middleware
     container_name: middleware
@@ -65,3 +109,6 @@ services:
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  postgres_data:

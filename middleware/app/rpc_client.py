@@ -32,7 +32,7 @@ class RpcClient:
         message_body = {
             'id': correlation_id,
             'task': task_name,
-            'args': [payload],
+            'args': payload if isinstance(payload, (list, tuple)) else [payload],
             'kwargs': {}
         }
 
