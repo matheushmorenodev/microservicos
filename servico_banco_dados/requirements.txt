@@ -1,0 +1,12 @@
+# Framework principal
+Django==4.1
+
+# Para criar APIs REST
+djangorestframework==3.14.0
+
+# Conector para o banco de dados PostgreSQL
+psycopg2-binary==2.9.5
+
+# Servidor de aplicação WSGI para rodar o Django em produção/Docker
+gunicorn==20.1.0
+whitenoise==6.6.0

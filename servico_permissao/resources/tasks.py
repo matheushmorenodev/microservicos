@@ -1,78 +1,70 @@
 from celery import shared_task
-from .models import Department, Room, IOT
-from .serializers import DepartmentSerializer, RoomSerializer, IOTSerializer
-from profiles.models import ActorUser
-from .constants import UserRoles
-import json
+import requests
+
+DB_SERVICE_URL = "http://db-service:8002/api"
+
+def ensure_user_exists(user_data):
+    """
+    Função auxiliar que garante que o usuário do token existe no db_service.
+    Usa o método PATCH, que cria se não existir ou atualiza se já existir.
+    """
+    user_id = user_data.get('id')
+    if not user_id:
+        return
+
+    # Dados que queremos garantir que estão no banco
+    data_to_sync = {
+        'user_id': user_id,
+        'username': user_data.get('username'),
+        'role': user_data.get('tipo_vinculo', 'Aluno') # Default para 'Aluno' se não vier no token
+    }
+    
+    try:
+        # Usamos o endpoint /api/users/{user_id}/. O DRF ViewSet lida com isso.
+        # O método PATCH é ideal aqui: ele atualiza um recurso existente ou pode ser configurado para criar.
+        # Vamos usar o método PUT para uma abordagem mais simples de get_or_create no backend.
+        requests.put(f"{DB_SERVICE_URL}/users/{user_id}/", json=data_to_sync, timeout=5)
+    except requests.RequestException as e:
+        # Se a sincronização falhar, apenas logamos, mas não paramos o fluxo principal
+        print(f"AVISO: Falha ao sincronizar usuário {user_id}: {e}")
+
+
+
+def call_db_service(endpoint, params=None):
+    try:
+        response = requests.get(f"{DB_SERVICE_URL}/{endpoint}/", params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {'error': f'Erro de comunicação com o serviço de banco de dados: {e}'}
+    except Exception as e:
+        return {'error': f'Erro inesperado: {e}'}
 
 @shared_task(name='list_departments_task')
 def list_departments_task(user_data):
-    """
-    Executa a lógica de negócio que antes estava na View.
-    Recebe os dados do usuário (payload do token) e retorna os departamentos.
-    """
-    try:
-        # Recria um objeto 'user' simples para usar na lógica de filtragem
-        user_role = user_data.get('tipo_vinculo')
-        user_id = user_data.get('id')
+    ensure_user_exists(user_data)
+    user_role = user_data.get('tipo_vinculo')
+    user_id = user_data.get('id')
+    
+    if user_role == 'Servidor':
+        return call_db_service('departments')
+    else:
+        return call_db_service('departments', params={'user_id': user_id})
 
-        queryset = Department.objects.none()
-
-        if user_role in (UserRoles.SERVIDOR, UserRoles.PRESTADOR_SERVICO):
-            queryset = Department.objects.all()
-        elif user_role == UserRoles.ALUNO:
-            queryset = Department.objects.filter(rooms__userpermissionroom__user_id=user_id).distinct()
-
-        serializer = DepartmentSerializer(queryset, many=True)
-
-        # Celery funciona melhor com tipos de dados primitivos (dict, list, etc)
-        return serializer.data
-
-    except Exception as e:
-        # É importante tratar exceções e retornar um erro claro
-        return {'error': str(e)}
-# --- NOVA TAREFA PARA LISTAR SALAS ---
 @shared_task(name='list_rooms_task')
 def list_rooms_task(user_data, department_pk):
-    try:
-        user_role = user_data.get('tipo_vinculo')
-        user_id = user_data.get('id')
-        queryset = Room.objects.none()
+    ensure_user_exists(user_data)
+    user_role = user_data.get('tipo_vinculo')
+    user_id = user_data.get('id')
+    
+    params = {'department_pk': department_pk}
+    if user_role != 'Servidor':
+        params['user_id'] = user_id
         
-        # Filtra primeiro pelo departamento solicitado
-        base_query = Room.objects.filter(department_id=department_pk)
+    return call_db_service('rooms', params=params)
 
-        if user_role in (UserRoles.SERVIDOR, UserRoles.ADMIN):
-            queryset = base_query.all()
-        elif user_role == UserRoles.ALUNO:
-            # Da base de salas do departamento, filtra apenas as que o usuário tem permissão
-            queryset = base_query.filter(userpermissionroom__user_id=user_id).distinct()
-
-        serializer = RoomSerializer(queryset, many=True)
-        return serializer.data
-    except Exception as e:
-        return {'error': str(e), 'service': 'permission_worker'}
-
-# --- NOVA TAREFA PARA LISTAR IOTS ---
 @shared_task(name='list_iots_task')
 def list_iots_task(user_data, room_pk):
-    try:
-        user_role = user_data.get('tipo_vinculo')
-        user_id = user_data.get('id')
-        
-        # Passo de segurança: antes de listar os IOTs, verifica se o usuário tem acesso à sala
-        tem_acesso = False
-        if user_role in (UserRoles.SERVIDOR, UserRoles.ADMIN):
-            tem_acesso = Room.objects.filter(pk=room_pk).exists()
-        elif user_role == UserRoles.ALUNO:
-            tem_acesso = Room.objects.filter(pk=room_pk, userpermissionroom__user_id=user_id).exists()
-
-        if not tem_acesso:
-            return {'error': 'Acesso negado a esta sala.'}
-
-        # Se tem acesso, lista os IOTs da sala
-        queryset = IOT.objects.filter(room_id=room_pk)
-        serializer = IOTSerializer(queryset, many=True)
-        return serializer.data
-    except Exception as e:
-        return {'error': str(e), 'service': 'permission_worker'}
+    # A lógica de permissão de acesso à sala agora é feita pela query no db_service
+    # Aqui apenas repassamos a chamada
+    return call_db_service('iots', params={'room_pk': room_pk})

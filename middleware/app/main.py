@@ -51,9 +51,9 @@ async def list_departments(authorization: str = Header(None)):
 
     user_payload = get_user_from_token(authorization)
     #SOMENTE PARA TESTE
-    # print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
-    # user_payload['tipo_vinculo'] = 'Servidor'
-    # print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
+    print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
+    user_payload['tipo_vinculo'] = 'Servidor'
+    print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
     print(f"Enviando tarefa 'list_departments_task' para o usuário {user_payload.get('username')}")
 
     response = await rpc_client.call('list_departments_task', user_payload)

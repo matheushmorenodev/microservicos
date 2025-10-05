@@ -1,10 +1,5 @@
-# A linha 'version' não é mais necessária, pode remover se quiser.
-# version: '3.8'
-
 services:
   # ------ INFRAESTRUTURA ------
-
-  # O BLOCO QUE PROVAVELMENTE ESTÁ FALTANDO
   postgres_db:
     image: postgres:13-alpine
     container_name: postgres_db
@@ -13,12 +8,18 @@ services:
     environment:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=mypassword
-      - POSTGRES_DB=permissions_db
+      - POSTGRES_DB=main_db
     ports:
       - "5432:5432"
     networks:
       - app-network
-
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d main_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
   rabbitmq:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
@@ -35,12 +36,11 @@ services:
       - app-network
 
   # ------ SERVIÇOS DA APLICAÇÃO ------
-  auth_service:
+  auth-service:
     build: ./api_autenticacao
-    container_name: auth_service
+    container_name: auth-service
     command: python manage.py runserver 0.0.0.0:8001
-    env_file:
-      - .env
+    env_file: .env
     volumes:
       - ./api_autenticacao:/app
     ports:
@@ -48,61 +48,62 @@ services:
     networks:
       - app-network
 
-  permission_worker:
-    build: ./servico_permissao
-    container_name: permission_worker
-    command: sh -c "python manage.py migrate && celery -A servico_permissao.celery worker --loglevel=info"
-    env_file:
-      - .env
-    volumes:
-      - ./servico_permissao:/app
-    environment:
-      - DB_NAME=permissions_db
-      - DB_USER=myuser
-      - DB_PASS=mypassword
-      - DB_HOST=postgres_db
-      - DB_PORT=5432
-    depends_on:
-      - postgres_db
-      - rabbitmq
-      - redis
-    networks:
-      - app-network
-
-  permission_admin:
-    build: ./servico_permissao
-    container_name: permission_admin
-    command: python manage.py runserver 0.0.0.0:8003
-    env_file:
-      - .env
-    volumes:
-      - ./servico_permissao:/app
+  # NOVO SERVIÇO DE BANCO DE DADOS (GUARDIÃO DOS DADOS)
+  db-service:
+    build: ./servico_banco_dados
+    container_name: db-service
+    command: sh -c "python manage.py migrate && gunicorn db_project.wsgi:application --bind 0.0.0.0:8002"
+    env_file: .env
     ports:
-      - "8003:8003"
+      - "8002:8002"
     environment:
-      - DB_NAME=permissions_db
+      - DB_NAME=main_db
       - DB_USER=myuser
       - DB_PASS=mypassword
       - DB_HOST=postgres_db
       - DB_PORT=5432
+    
+    restart: on-failure 
     depends_on:
-      - postgres_db
+      postgres_db:
+        condition: service_healthy 
     networks:
       - app-network
+  
 
+  # WORKER DE PERMISSÃO (AGORA STATELESS)
+  permission-worker:
+    build: ./servico_permissao
+    container_name: permission-worker
+    command: celery -A servico_permissao.celery worker --loglevel=info
+    env_file: .env
+    volumes:
+      - ./servico_permissao:/app
+    # --- ADIÇÃO IMPORTANTE ---
+    restart: on-failure
+    depends_on:
+      db-service:
+        condition: service_started # Espera o db_service iniciar
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+    # -------------------------
+    networks:
+      - app-network
+  
   middleware:
     build: ./middleware
     container_name: middleware
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
     ports:
       - "8000:8000"
     volumes:
       - ./middleware:/app
     depends_on:
       - rabbitmq
-      - permission_worker
+      - permission-worker
     networks:
       - app-network
 
