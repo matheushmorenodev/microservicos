@@ -91,7 +91,21 @@ services:
     # -------------------------
     networks:
       - app-network
-  
+  log-worker:
+    build: ./servico_de_log
+    container_name: log-worker
+    # Este comando faz o worker ouvir APENAS a fila 'log_queue'
+    command: celery -A log_project.celery worker -Q log_queue --loglevel=info
+    env_file: .env
+    volumes:
+      - ./servico_de_log:/app
+    restart: on-failure
+    depends_on:
+      - rabbitmq
+      - db-service
+    networks:
+      - app-network
+      
   middleware:
     build: ./middleware
     container_name: middleware

@@ -8,6 +8,8 @@ from .serializers import (
     UserPermissionRoomSerializer,
     IOTSerializer
 )
+from .models import LogEntry
+from .serializers import LogEntrySerializer
 
 class ActorUserViewSet(viewsets.ModelViewSet):
     queryset = ActorUser.objects.all()
@@ -60,3 +62,8 @@ class UserPermissionRoomViewSet(viewsets.ModelViewSet):
     queryset = UserPermissionRoom.objects.all()
     serializer_class = UserPermissionRoomSerializer
     filterset_fields = ['user', 'room']
+    
+#View para o log
+class LogEntryViewSet(viewsets.ModelViewSet):
+    queryset = LogEntry.objects.all()
+    serializer_class = LogEntrySerializer

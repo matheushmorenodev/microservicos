@@ -1,5 +1,5 @@
 # middleware/app/main.py
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status, Request
 from .rpc_client import RpcClient
 import jwt
 import os
@@ -43,13 +43,15 @@ def get_user_from_token(token: str):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Erro ao processar token",
         )
+        
 # -- ENDPOINT PARA LISTAR DEPARTAMENTOS ---
 @app.get("/api/departments/")
-async def list_departments(authorization: str = Header(None)):
+async def list_departments(request: Request, authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
 
     user_payload = get_user_from_token(authorization)
+    user_payload['source_ip'] = request.client.host
     #SOMENTE PARA TESTE
     print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
     user_payload['tipo_vinculo'] = 'Servidor'
@@ -65,14 +67,15 @@ async def list_departments(authorization: str = Header(None)):
 
 # --- ENDPOINT PARA LISTAR SALAS ---
 @app.get("/api/departments/{department_pk}/rooms/")
-async def list_rooms(department_pk: int, authorization: str = Header(None)):
+async def list_rooms(request: Request, department_pk: int, authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
     
     user_payload = get_user_from_token(authorization)
+    user_payload['source_ip'] = request.client.host
     #SOMENTE PARA TESTE
     # print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
-    # user_payload['tipo_vinculo'] = 'Servidor'
+    user_payload['tipo_vinculo'] = 'Servidor'
     # print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
     print(f"Enviando tarefa 'list_rooms_task' para o departamento {department_pk}")
     
@@ -86,14 +89,15 @@ async def list_rooms(department_pk: int, authorization: str = Header(None)):
 
 # --- ENDPOINT PARA LISTAR IOTS ---
 @app.get("/api/rooms/{room_pk}/iots/")
-async def list_iots(room_pk: int, authorization: str = Header(None)):
+async def list_iots(request: Request, room_pk: int, authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
     
     user_payload = get_user_from_token(authorization)
+    user_payload['source_ip'] = request.client.host
     #SOMENTE PARA TESTE
     # print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
-    # user_payload['tipo_vinculo'] = 'Servidor'
+    user_payload['tipo_vinculo'] = 'Servidor'
     # print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
     print(f"Enviando tarefa 'list_iots_task' para a sala {room_pk}")
     

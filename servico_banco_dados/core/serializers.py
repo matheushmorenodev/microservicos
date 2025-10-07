@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import ActorUser, Department, Room, UserPermissionRoom, IOT
+from .models import ActorUser, Department, Room, UserPermissionRoom, IOT, LogEntry
 
 class ActorUserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -25,3 +25,9 @@ class UserPermissionRoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserPermissionRoom
         fields = ['id', 'user', 'room']
+        
+#Log
+class LogEntrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LogEntry
+        fields = ['id', 'timestamp', 'service_name', 'level', 'message', 'correlation_id']

@@ -8,6 +8,7 @@ router.register(r'departments', DepartmentViewSet, basename='department')
 router.register(r'rooms', RoomViewSet, basename='room')
 router.register(r'iots', IOTViewSet, basename='iot')
 router.register(r'user-permissions', UserPermissionRoomViewSet)
+router.register(r'logs', LogEntryViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

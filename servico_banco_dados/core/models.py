@@ -4,6 +4,7 @@ from django.db import models
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+
 class ActorUser(models.Model):
     class Role(models.TextChoices):
         ALUNO = 'Aluno', _('Aluno')
@@ -46,3 +47,17 @@ class UserPermissionRoom(models.Model):
 
     def __str__(self):
         return f"{self.user.username} -> {self.room.name}"
+    
+#modelo dos logs
+class LogEntry(models.Model):
+    timestamp = models.DateTimeField(auto_now_add=True)
+    service_name = models.CharField(max_length=100, db_index=True)
+    level = models.CharField(max_length=10, db_index=True)
+    message = models.TextField()
+    correlation_id = models.CharField(max_length=255, db_index=True, null=True, blank=True)
+
+    def __str__(self):
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] [{self.service_name}] {self.message}"
+
+    class Meta:
+        ordering = ['-timestamp']
