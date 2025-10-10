@@ -53,7 +53,7 @@ class MQTTClient:
                 client.subscribe(topic)
                 print(f"Inscrito no tópico: {topic}")
         else:
-            print(f"Falha ao conectar, código de retorno {rc}\n")
+            print(f"Falha ao conectar, código de retorno {rc}\n") 
 
     def on_message(self, client, userdata, msg):
         """
