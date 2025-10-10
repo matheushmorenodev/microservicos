@@ -10,3 +10,4 @@ psycopg2-binary==2.9.5
 # Servidor de aplicação WSGI para rodar o Django em produção/Docker
 gunicorn==20.1.0
 whitenoise==6.6.0
+django-filter==23.5

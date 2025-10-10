@@ -58,6 +58,7 @@ def list_departments_task(self, user_data):
     user_role = user_data.get('tipo_vinculo')
     source_ip = user_data.get('source_ip', 'N/A')
     correlation_id = self.request.id
+    ensure_user_exists(user_data)
 
     log_details_start = f"User: {user_id} ({username}, {user_role}). Source IP: {source_ip}."
     log_task(correlation_id, 'INFO', 'list_departments', 'STARTED', log_details_start)
@@ -92,6 +93,7 @@ def list_rooms_task(self, user_data, department_pk):
     user_role = user_data.get('tipo_vinculo')
     source_ip = user_data.get('source_ip', 'N/A')
     correlation_id = self.request.id
+    ensure_user_exists(user_data)
 
     log_details_start = f"User: {user_id} ({username}, {user_role}). Source IP: {source_ip}. Resource: department_id={department_pk}."
     log_task(correlation_id, 'INFO', 'list_rooms', 'STARTED', log_details_start)
@@ -151,3 +153,32 @@ def list_iots_task(self, user_data, room_pk):
         log_details_error = f"Reason: {e}. Duration: {duration:.2f}ms."
         log_task(correlation_id, 'ERROR', 'list_iots', 'FAILURE', log_details_error)
         return {'error': str(e)}
+    
+@shared_task(name='check_iot_permission_task')
+def check_iot_permission_task(user_data, iot_name):
+    """Verifica se um usuário tem permissão para um IOT específico."""
+    user_id = user_data.get('id')
+    user_role = user_data.get('tipo_vinculo')
+
+    if user_role == 'Servidor':
+        return {'allowed': True} # Servidor sempre tem permissão
+
+    # Pergunta ao db-service se existe alguma permissão para este usuário e este IOT
+    params = {'user': user_id, 'iot_name': iot_name}
+    response = call_db_service('user-permissions', params=params)
+
+    if isinstance(response, dict) and 'error' in response:
+        return {'allowed': False, 'error': response['error']}
+
+    # Se a lista de resposta não for vazia, significa que existe uma permissão
+    return {'allowed': len(response) > 0}
+
+@shared_task(name='get_iot_details_task')
+def get_iot_details_task(iot_name):
+    """Busca os detalhes completos de um IOT pelo nome."""
+    response = call_db_service('iots', params={'name': iot_name})
+
+    if isinstance(response, list) and len(response) > 0:
+        return response[0] # Retorna o primeiro resultado da busca
+    else:
+        return None # Ou retorna o erro, se houver

@@ -35,6 +35,18 @@ services:
     networks:
       - app-network
 
+  emqx:
+    image: emqx/emqx:latest
+    container_name: emqx_broker
+    ports:
+      - "1883:1883"      # Porta padrão do MQTT
+      - "18083:18083"    # Dashboard de gerenciamento do EMQX
+    networks:
+      - app-network
+    environment:
+      EMQX_NAME: emqx_broker
+      EMQX_HOST: localhost
+
   # ------ SERVIÇOS DA APLICAÇÃO ------
   auth-service:
     build: ./api_autenticacao
@@ -52,7 +64,7 @@ services:
   db-service:
     build: ./servico_banco_dados
     container_name: db-service
-    command: sh -c "python manage.py migrate && gunicorn db_project.wsgi:application --bind 0.0.0.0:8002"
+    command: sh -c "python manage.py migrate && gunicorn db_project.wsgi:application --bind 0.0.0.0:8002 --workers 3 --timeout 120"
     env_file: .env
     ports:
       - "8002:8002"
@@ -106,6 +118,21 @@ services:
     networks:
       - app-network
       
+  mqtt-worker:
+    build: ./mqtt-worker
+    container_name: mqtt-worker
+    command: celery -A mqtt_project.celery worker -Q mqtt_commands --loglevel=info
+    env_file: .env
+    volumes:
+      - ./mqtt-worker:/app
+    restart: on-failure
+    depends_on:
+      - rabbitmq
+      - db-service
+      - emqx
+    networks:
+      - app-network
+
   middleware:
     build: ./middleware
     container_name: middleware
@@ -118,6 +145,7 @@ services:
     depends_on:
       - rabbitmq
       - permission-worker
+      - mqtt-worker
     networks:
       - app-network
 

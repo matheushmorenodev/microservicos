@@ -12,11 +12,13 @@ class DepartmentSerializer(serializers.ModelSerializer):
         fields = ['id', 'name']
 
 class RoomSerializer(serializers.ModelSerializer):
+    department = DepartmentSerializer(read_only=True)
     class Meta:
         model = Room
         fields = ['id', 'name', 'department']
 
 class IOTSerializer(serializers.ModelSerializer):
+    room = RoomSerializer(read_only=True)
     class Meta:
         model = IOT
         fields = ['id', 'name', 'status', 'room']
