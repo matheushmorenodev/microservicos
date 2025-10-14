@@ -1,7 +1,10 @@
 from celery import shared_task
 import requests
 import time
+import json
 from servico_permissao.celery import app as celery_app
+
+
 DB_SERVICE_URL = "http://db-service:8002/api"
 
 def ensure_user_exists(user_data):
@@ -153,32 +156,82 @@ def list_iots_task(self, user_data, room_pk):
         log_details_error = f"Reason: {e}. Duration: {duration:.2f}ms."
         log_task(correlation_id, 'ERROR', 'list_iots', 'FAILURE', log_details_error)
         return {'error': str(e)}
-    
-@shared_task(name='check_iot_permission_task')
-def check_iot_permission_task(user_data, iot_name):
-    """Verifica se um usuário tem permissão para um IOT específico."""
+############################################################################################
+def send_mqtt_command(command_data: dict):
+    """
+    Função auxiliar para enviar um comando para a fila do serviço MQTT.
+    Usa o pool de produtores do Celery para enviar uma mensagem bruta,
+    compatível com consumidores que não são do Celery (como pika).
+    """
+    try:
+        # Pega um produtor de baixo nível do pool de conexões do Celery
+        with celery_app.producer_pool.acquire(block=True) as producer:
+            # Serializa nosso dicionário para uma string JSON e a codifica para bytes
+            message_body = json.dumps(command_data).encode('utf-8')
+            
+            # Publica a mensagem diretamente na fila desejada
+            producer.publish(
+                body=message_body,
+                routing_key='mqtt_commands',  # O nome da nossa fila
+                content_type='application/json',
+                content_encoding='utf-8',
+                # Garante que a mensagem seja persistente no RabbitMQ
+                delivery_mode=2  
+            )
+        print(f"Comando MQTT enviado para a fila 'mqtt_commands': {command_data}")
+    except Exception as e:
+        print(f"ERRO CRÍTICO ao enviar comando para a fila MQTT: {e}")
+
+@shared_task(name='open_door_task', bind=True)
+def open_door_task(self, user_data, iot_pk):
+    start_time = time.time()
     user_id = user_data.get('id')
-    user_role = user_data.get('tipo_vinculo')
+    username = user_data.get('username')
+    source_ip = user_data.get('source_ip', 'N/A')
+    correlation_id = self.request.id
 
-    if user_role == 'Servidor':
-        return {'allowed': True} # Servidor sempre tem permissão
+    log_details_start = f"User: {username} ({user_id}). Source IP: {source_ip}. Resource: iot_pk={iot_pk}."
+    log_task(correlation_id, 'INFO', 'open_door', 'STARTED', log_details_start)
 
-    # Pergunta ao db-service se existe alguma permissão para este usuário e este IOT
-    params = {'user': user_id, 'iot_name': iot_name}
-    response = call_db_service('user-permissions', params=params)
+    try:
+        # 1. Obter informações do IOT para saber a sala
+        iot_info = call_db_service(f'iots/{iot_pk}')
+        if 'error' in iot_info:
+            raise Exception(f"IOT com pk={iot_pk} não encontrado.")
+        
+        room_pk = iot_info.get('room', {}).get('id')
+        iot_name = iot_info.get('name')
 
-    if isinstance(response, dict) and 'error' in response:
-        return {'allowed': False, 'error': response['error']}
+        # 2. Verificar permissão do usuário para aquela sala
+        # Supondo que o db_service possa responder se um usuário tem permissão para uma sala
+        permission_info = call_db_service('user-permissions', params={'user': user_id, 'room': room_pk})
+        
+        if not permission_info: # Se a lista de permissões for vazia
+             raise PermissionError(f"Acesso negado: Usuário {username} não tem permissão para a sala {room_pk}.")
 
-    # Se a lista de resposta não for vazia, significa que existe uma permissão
-    return {'allowed': len(response) > 0}
+        # 3. Se tiver permissão, montar e enviar o comando MQTT
+        mqtt_topic = f"campus/geral/{iot_name}/command"
+        mqtt_payload = json.dumps({"command": "open", "requested_by": username})
+        
+        command_to_send = {
+            "action": "publish",
+            "topic": mqtt_topic,
+            "payload": mqtt_payload,
+            "qos": 1
+        }
+        send_mqtt_command(command_to_send)
+        
+        duration = (time.time() - start_time) * 1000
+        log_task(correlation_id, 'INFO', 'open_door', 'SUCCESS', f"Comando 'open' enviado para {iot_name}. Duration: {duration:.2f}ms.")
 
-@shared_task(name='get_iot_details_task')
-def get_iot_details_task(iot_name):
-    """Busca os detalhes completos de um IOT pelo nome."""
-    response = call_db_service('iots', params={'name': iot_name})
+        return {"status": "success", "message": f"Comando para abrir porta {iot_name} enviado."}
 
-    if isinstance(response, list) and len(response) > 0:
-        return response[0] # Retorna o primeiro resultado da busca
-    else:
-        return None # Ou retorna o erro, se houver
+    except PermissionError as e:
+        duration = (time.time() - start_time) * 1000
+        log_task(correlation_id, 'WARNING', 'open_door', 'FAILURE', f"Reason: {e}. Duration: {duration:.2f}ms.")
+        return {'error': str(e), 'status_code': 403} # Retornar um erro de permissão
+
+    except Exception as e:
+        duration = (time.time() - start_time) * 1000
+        log_task(correlation_id, 'ERROR', 'open_door', 'FAILURE', f"Reason: {e}. Duration: {duration:.2f}ms.")
+        return {'error': str(e), 'status_code': 500}

@@ -1,8 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import *
-from .views import (MqttClientConnectedView,
-                    MqttClientDisconnectedView)
 
 router = DefaultRouter()
 router.register(r'users', ActorUserViewSet, basename='actoruser')
@@ -14,6 +12,4 @@ router.register(r'logs', LogEntryViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('mqtt/connected/', MqttClientConnectedView.as_view()),
-    path('mqtt/disconnected/', MqttClientDisconnectedView.as_view()),
 ]

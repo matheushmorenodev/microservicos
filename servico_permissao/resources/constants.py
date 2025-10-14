@@ -1,4 +1,3 @@
-# constants.py
 from django.db import models
 
 class UserRoles(models.TextChoices):
@@ -6,4 +5,3 @@ class UserRoles(models.TextChoices):
     PRESTADOR_SERVICO = "Prestador Servico", "Prestador de Serviço"
     ALUNO = "Aluno", "Aluno"
     ADMIN = "Admin", "Admin"
-    # Adicione outros papéis aqui
