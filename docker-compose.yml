@@ -145,7 +145,7 @@ services:
   mqtt-communication-service:
     build: ./servico_comunicacao_MQTT
     container_name: mqtt-communication-service
-    command: python main.py
+    # command: python main.py
     restart: on-failure
     env_file: .env
     environment:

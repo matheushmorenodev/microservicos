@@ -87,7 +87,6 @@ def list_departments_task(self, user_data):
         log_task(correlation_id, 'ERROR', 'list_departments', 'FAILURE', log_details_error)
         return {'error': str(e)}
 
-
 @shared_task(name='list_rooms_task', bind=True)
 def list_rooms_task(self, user_data, department_pk):
     start_time = time.time()
@@ -123,7 +122,6 @@ def list_rooms_task(self, user_data, department_pk):
         log_task(correlation_id, 'ERROR', 'list_rooms', 'FAILURE', log_details_error)
         return {'error': str(e)}
 
-
 @shared_task(name='list_iots_task', bind=True)
 def list_iots_task(self, user_data, room_pk):
     start_time = time.time()
@@ -156,7 +154,7 @@ def list_iots_task(self, user_data, room_pk):
         log_details_error = f"Reason: {e}. Duration: {duration:.2f}ms."
         log_task(correlation_id, 'ERROR', 'list_iots', 'FAILURE', log_details_error)
         return {'error': str(e)}
-############################################################################################
+
 def send_mqtt_command(command_data: dict):
     """
     Função auxiliar para enviar um comando para a fila do serviço MQTT.

@@ -3,7 +3,7 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework import exceptions
 import jwt
 from django.conf import settings
-from profiles.models import ActorUser
+# from profiles.models import ActorUser
 from .constants import UserRoles # ✨ Usando constantes
 
 class JWTAuthentication(BaseAuthentication):
@@ -37,13 +37,13 @@ class JWTAuthentication(BaseAuthentication):
         if not user_id or not username:
             raise exceptions.AuthenticationFailed("Payload do token incompleto.")
 
-        # Usa update_or_create para simplificar e garantir atomicidade
-        user, created = ActorUser.objects.update_or_create(
-            user_id=user_id,
-            defaults={
-                "username": username,
-                "role": payload.get("tipo_vinculo", UserRoles.ALUNO), # Usando constante
-            },
-        )
+        # # Usa update_or_create para simplificar e garantir atomicidade
+        # user, created = ActorUser.objects.update_or_create(
+        #     user_id=user_id,
+        #     defaults={
+        #         "username": username,
+        #         "role": payload.get("tipo_vinculo", UserRoles.ALUNO), # Usando constante
+        #     },
+        # )
 
         return (user, None) # Sucesso na autenticação
