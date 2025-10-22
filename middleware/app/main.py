@@ -1,132 +1,166 @@
 # middleware/app/main.py
-from fastapi import FastAPI, Header, HTTPException, status, Request
-from .rpc_client import RpcClient
-import jwt
-import os
-from aio_pika.exceptions import AMQPError
-from aio_pika import connect, IncomingMessage, Message
-from .rpc_client import RpcClient
-import json
 
+import os
+import logging
+import jwt
+from fastapi import FastAPI, Header, HTTPException, status, Request, Depends
+
+# Importe o RpcClient do seu outro arquivo
+from .rpc_client import RpcClient
+
+# ======================================================================================
+#                                 CONFIGURAÇÃO INICIAL
+# ======================================================================================
+
+# 1. Configuração do Logging
+# Define o logger para ser usado em todo o aplicativo
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 2. Validação da Chave Secreta
+# O aplicativo não deve iniciar sem uma chave de segurança definida
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    logger.critical("Variável de ambiente 'DJANGO_SECRET_KEY' não definida. Encerrando.")
+    raise ValueError("A variável de ambiente 'DJANGO_SECRET_KEY' é obrigatória.")
+
+# 3. Inicialização do FastAPI e do Cliente RPC
 app = FastAPI()
 rpc_client = RpcClient('amqp://guest:guest@rabbitmq:5672//')
 
-
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'default-insecure-key-for-dev')
+# ======================================================================================
+#                                 EVENTOS DE CICLO DE VIDA
+# ======================================================================================
 
 @app.on_event("startup")
 async def startup():
-    await rpc_client.connect()
+    # A conexão com o RabbitMQ agora é "lazy" (preguiçosa), feita na primeira requisição
+    logger.info("Middleware iniciado. RpcClient pronto para conectar quando necessário.")
 
-def get_user_from_token(token: str):
+@app.on_event("shutdown")
+async def shutdown():
+    # Fecha a conexão com o RabbitMQ de forma limpa ao encerrar o app
+    logger.info("Middleware encerrando. Fechando conexão RPC.")
+    await rpc_client.close()
+
+# ======================================================================================
+#                       AUTENTICAÇÃO E INJEÇÃO DE DEPENDÊNCIA
+# ======================================================================================
+
+def get_user_from_token(token: str) -> dict:
+    """Decodifica o token JWT e retorna o payload ou levanta uma HTTPException."""
     try:
         clean_token = token.split(" ")[1]
-        # Adicione um 'leeway' de 10 segundos para lidar com pequenas diferenças de relógio entre os contêineres
         payload = jwt.decode(
             clean_token, 
             SECRET_KEY, 
             algorithms=["HS256"],
-            options={"leeway": 10} # <--- ADICIONE ESTA OPÇÃO
+            # Lida com pequenas diferenças de relógio entre os contêineres
+            options={"leeway": 10} 
         )
         return payload
-    except jwt.ExpiredSignatureError as e: # Captura erro de token expirado
-        print(f"ERRO DE DECODIFICAÇÃO: Token expirado! - {e}")
+    except jwt.ExpiredSignatureError as e:
+        logger.warning(f"Tentativa de acesso com token expirado: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expirado",
+            detail="Token expirado. Por favor, faça login novamente.",
         )
-    except jwt.InvalidTokenError as e: # Captura todos os outros erros de token inválido
-        print(f"ERRO DE DECODIFICAÇÃO: Token inválido! - {e}")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Tentativa de acesso com token inválido: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token inválido: {e}",
         )
-    except Exception as e: # Captura qualquer outro erro inesperado
-        print(f"ERRO INESPERADO AO PROCESSAR TOKEN: {e}")
+    except Exception as e:
+        logger.error(f"Erro inesperado ao processar token: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Erro ao processar token",
+            detail="Não foi possível processar o token de autorização.",
         )
-        
-# -- ENDPOINT PARA LISTAR DEPARTAMENTOS ---
-@app.get("/api/departments/")
-async def list_departments(request: Request, authorization: str = Header(None)):
+
+async def get_current_user(request: Request, authorization: str = Header(None)) -> dict:
+    """
+    Função de dependência do FastAPI para validar o token e extrair os dados do usuário.
+    Esta função será executada antes de cada endpoint que a solicitar.
+    """
     if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
-
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Token de autorização não fornecido"
+        )
+    
     user_payload = get_user_from_token(authorization)
+    # Adiciona o IP de origem ao payload para fins de log
     user_payload['source_ip'] = request.client.host
-    #SOMENTE PARA TESTE
-    #print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
-    #user_payload['tipo_vinculo'] = 'Servidor'
-    #print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
-    print(f"Enviando tarefa 'list_departments_task' para o usuário {user_payload.get('username')}")
+    return user_payload
 
-    response = await rpc_client.call('list_departments_task', user_payload)
+# ======================================================================================
+#                                     ENDPOINTS DA API
+# ======================================================================================
+
+@app.get("/api/departments/")
+async def list_departments(user: dict = Depends(get_current_user)):
+    """Lista departamentos com base nas permissões do usuário."""
+    logger.info(f"Usuário '{user.get('username')}' solicitou a lista de departamentos.")
+    
+    response = await rpc_client.call(
+        'list_departments_task', 
+        user, 
+        queue='permission_queue'
+    )
 
     if 'error' in response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
 
     return response.get('result')
 
-# --- ENDPOINT PARA LISTAR SALAS ---
+
 @app.get("/api/departments/{department_pk}/rooms/")
-async def list_rooms(request: Request, department_pk: int, authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
+async def list_rooms(department_pk: int, user: dict = Depends(get_current_user)):
+    """Lista as salas de um departamento específico, respeitando as permissões."""
+    logger.info(f"Usuário '{user.get('username')}' solicitou salas do departamento {department_pk}.")
     
-    user_payload = get_user_from_token(authorization)
-    user_payload['source_ip'] = request.client.host
-    #SOMENTE PARA TESTE
-    # print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
-    #user_payload['tipo_vinculo'] = 'Servidor'
-    # print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
-    print(f"Enviando tarefa 'list_rooms_task' para o departamento {department_pk}")
-    
-    # Chama a tarefa remota, passando o payload E o ID do departamento
-    response = await rpc_client.call('list_rooms_task', (user_payload, department_pk))
+    response = await rpc_client.call(
+        'list_rooms_task', 
+        (user, department_pk), 
+        queue='permission_queue'
+    )
 
     if response.get('error'):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
 
     return response.get('result')
 
-# --- ENDPOINT PARA LISTAR IOTS ---
+
 @app.get("/api/rooms/{room_pk}/iots/")
-async def list_iots(request: Request, room_pk: int, authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
-    
-    user_payload = get_user_from_token(authorization)
-    user_payload['source_ip'] = request.client.host
-    #SOMENTE PARA TESTE
-    # print(f"Papel original do token: {user_payload.get('tipo_vinculo')}")
-    #user_payload['tipo_vinculo'] = 'Servidor'
-    # print(f"Forçando papel para: {user_payload.get('tipo_vinculo')}")
-    print(f"Enviando tarefa 'list_iots_task' para a sala {room_pk}")
-    
-    # Chama a tarefa remota, passando o payload E o ID da sala
-    response = await rpc_client.call('list_iots_task', (user_payload, room_pk))
+async def list_iots(room_pk: int, user: dict = Depends(get_current_user)):
+    """Lista os dispositivos IoT de uma sala específica, respeitando as permissões."""
+    logger.info(f"Usuário '{user.get('username')}' solicitou IoTs da sala {room_pk}.")
+
+    response = await rpc_client.call(
+        'list_iots_task', 
+        (user, room_pk), 
+        queue='permission_queue'
+    )
 
     if response.get('error'):
-        # Se o erro for de acesso negado, retorna 403 Forbidden
         if "Acesso negado" in response['error']:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=response['error'])
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
 
     return response.get('result')
 
+
 @app.post("/api/iots/{iot_pk}/open/")
-async def open_door(request: Request, iot_pk: int, authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token não fornecido")
+async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
+    """Envia um comando para abrir a porta de um dispositivo IoT específico."""
+    logger.info(f"Usuário '{user.get('username')}' solicitou abertura da porta para o IoT {iot_pk}.")
     
-    user_payload = get_user_from_token(authorization)
-    user_payload['source_ip'] = request.client.host
-    
-    print(f"Enviando tarefa 'open_door_task' para o IOT {iot_pk} a pedido de {user_payload.get('username')}")
-    
-    response = await rpc_client.call('open_door_task', (user_payload, iot_pk))
+    response = await rpc_client.call(
+        'open_door_task', 
+        (user, iot_pk), 
+        queue='permission_queue'
+    )
 
     if response.get('error'):
         status_code = response.get('status_code', 500)

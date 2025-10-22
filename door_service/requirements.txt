@@ -1,0 +1,4 @@
+celery
+requests
+paho-mqtt
+amqp

@@ -20,7 +20,7 @@ def ensure_user_exists(user_data):
     data_to_sync = {
         'user_id': user_id,
         'username': user_data.get('username'),
-        'role': user_data.get('tipo_vinculo', 'Aluno') # Default para 'Aluno' se não vier no token
+        'role': user_data.get('tipo_vinculo')
     }
     
     try:

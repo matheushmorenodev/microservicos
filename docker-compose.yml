@@ -1,4 +1,7 @@
 services:
+  # ======================================================================================
+  #                           Serviços de Infraestrutura
+  # ======================================================================================
   postgres_db:
     image: postgres:13-alpine
     container_name: postgres_db
@@ -9,7 +12,7 @@ services:
       - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=main_db
     ports:
-      - "5432:5432"
+      - "5432:5432" # Mantido para depuração local
     networks:
       - app-network
     healthcheck:
@@ -22,8 +25,8 @@ services:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5672:5672"   # Porta para os workers Celery
+      - "15672:15672" # Interface de gerenciamento
     networks:
       - app-network
     healthcheck:
@@ -32,75 +35,40 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:alpine
-    container_name: redis
+  emqx:
+    image: emqx/emqx:5.1.0
+    container_name: emqx
+    ports:
+      - "1883:1883"    # Porta padrão MQTT
+      - "18083:18083"  # Dashboard/API HTTP
+      # - "8083:8083"    # WebSocket (opcional)
+      # - "8883:8883"    # MQTT SSL (opcional)
+    environment:
+      - "EMQX_NAME=emqx-node1"
+      - "EMQX_HOST=emqx"
+      - "EMQX_ALLOW_ANONYMOUS=true" # Apenas para desenvolvimento
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx_ctl", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ======================================================================================
+  #                           Serviços de API (Interface)
+  # ======================================================================================
 
   auth-service:
     build: ./api_autenticacao
     container_name: auth-service
+    # AVISO: 'runserver' não é para produção. Use Gunicorn como no 'db-service'.
     command: python manage.py runserver 0.0.0.0:8001
     env_file: .env
     volumes:
-      - ./api_autenticacao:/app
+      - ./api_autenticacao:/app # Volume para hot-reload em dev
     ports:
       - "8001:8001"
-    networks:
-      - app-network
-
-  db-service:
-    build: ./servico_banco_dados
-    container_name: db-service
-    command: sh -c "python manage.py migrate && gunicorn db_project.wsgi:application --bind 0.0.0.0:8002 --workers 3 --timeout 120"
-    env_file: .env
-    volumes:
-      - ./servico_banco_dados:/app
-    ports:
-      - "8002:8002"
-    environment:
-      - DB_NAME=main_db
-      - DB_USER=myuser
-      - DB_PASS=mypassword
-      - DB_HOST=postgres_db
-      - DB_PORT=5432
-    restart: on-failure 
-    depends_on:
-      postgres_db:
-        condition: service_healthy 
-    networks:
-      - app-network
-
-  permission-worker:
-    build: ./servico_permissao
-    container_name: permission-worker
-    command: celery -A servico_permissao.celery worker --loglevel=info
-    env_file: .env
-    volumes:
-      - ./servico_permissao:/app
-    restart: on-failure
-    depends_on:
-      db-service:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - app-network
-
-  log-worker:
-    build: ./servico_de_log
-    container_name: log-worker
-    command: celery -A log_project.celery worker -Q log_queue --loglevel=info
-    env_file: .env
-    volumes:
-      - ./servico_de_log:/app
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      db-service:
-        condition: service_started
     networks:
       - app-network
 
@@ -112,47 +80,88 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./middleware:/app
+      - ./middleware:/app # Volume para hot-reload em dev
     depends_on:
       rabbitmq:
         condition: service_healthy
-      permission-worker:
+      permission-service: # Espera o worker de permissão iniciar
         condition: service_started
     networks:
       - app-network
-  emqx:
-      image: emqx/emqx:5.1.0
-      container_name: emqx
-      ports:
-        - "1883:1883"      # Porta padrão MQTT
-        - "8083:8083"      # WebSocket
-        - "8084:8084"      # WebSocket SSL
-        - "8883:8883"      # MQTT SSL
-        - "18083:18083"    # Dashboard/API HTTP
-      environment:
-        - "EMQX_NAME=emqx-node1"
-        - "EMQX_HOST=emqx"
-        # Desabilitar autenticação para desenvolvimento. Em produção, isso deve ser configurado.
-        - "EMQX_ALLOW_ANONYMOUS=true" 
-      networks:
-        - app-network
-      healthcheck:
-        test: ["CMD", "/opt/emqx/bin/emqx_ctl", "status"]
-        interval: 15s
-        timeout: 10s
-        retries: 10
 
-  mqtt-communication-service:
-    build: ./servico_comunicacao_MQTT
-    container_name: mqtt-communication-service
-    # command: python main.py
-    restart: on-failure
-    env_file: .env
+  # ======================================================================================
+  #                           Serviços de Lógica (Workers)
+  # ======================================================================================
+
+  db-service:
+    build: ./servico_banco_dados
+    container_name: db-service
+    # Comando correto: executa migrações e inicia o servidor Gunicorn
+    command: sh -c "python manage.py migrate && gunicorn db_project.wsgi:application --bind 0.0.0.0:8002 --workers 3 --timeout 120"
+    env_file: .env # As variáveis de DB devem estar no seu arquivo .env
+    volumes:
+      - ./servico_banco_dados:/app # Volume para hot-reload em dev
+    ports:
+      - "8002:8002"
     environment:
-      - MQTT_BROKER_HOST=emqx
-      - MQTT_BROKER_PORT=1883
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_QUEUE=mqtt_commands
+      - DB_NAME=main_db
+      - DB_USER=myuser
+      - DB_PASS=mypassword
+      - DB_HOST=postgres_db
+      - DB_PORT=5432
+    restart: on-failure
+    depends_on:
+      postgres_db: # Garante que o banco de dados esteja pronto
+        condition: service_healthy
+    networks:
+      - app-network
+
+  permission-service:
+    build: ./permission_service
+    container_name: permission-service
+    # AJUSTE CRÍTICO: Comando para rodar o worker Celery
+    # Aponta para o app 'tasks' e escuta a fila 'permission_queue'
+    command: celery -A tasks worker --loglevel=info -Q permission_queue
+    env_file: .env
+    volumes:
+      - ./permission_service:/app
+    restart: on-failure
+    depends_on:
+      db-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  log-service:
+    build: ./log_service
+    container_name: log-service
+    # AJUSTE CRÍTICO: Comando para rodar o worker Celery
+    # Aponta para o app 'tasks' e escuta a fila 'log_queue'
+    command: celery -A tasks worker --loglevel=info -Q log_queue
+    env_file: .env
+    volumes:
+      - ./log_service:/app
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db-service:
+        condition: service_started
+    networks:
+      - app-network
+
+  door-service:
+    build: ./door_service
+    container_name: door-service
+    # AJUSTE CRÍTICO: Comando para rodar o worker Celery
+    # Aponta para o app 'tasks' e escuta a fila 'door_commands'
+    command: celery -A tasks worker --loglevel=info -Q door_commands
+    restart: on-failure
+    env_file: .env # As variáveis de MQTT/DB devem estar no seu .env
+    volumes:
+      - ./door_service:/app
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -161,10 +170,13 @@ services:
     networks:
       - app-network
 
-
+# ======================================================================================
+#                                 Redes e Volumes
+# ======================================================================================
 networks:
   app-network:
     driver: bridge
 
 volumes:
   postgres_data:
+    # O driver 'local' é o padrão, não precisa ser especificado

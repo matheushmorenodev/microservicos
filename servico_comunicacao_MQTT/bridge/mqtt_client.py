@@ -10,7 +10,7 @@ class MQTTBridgeClient:
         self.port = port
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
-            client_id="service_mqtt"
+            client_id="door_service"
         )
         self._setup_callbacks()
         self.last_messages = {}
