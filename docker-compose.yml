@@ -36,7 +36,7 @@ services:
       retries: 10
 
   emqx:
-    image: emqx/emqx:5.1.0
+    image: emqx/emqx:5.8.8
     container_name: emqx
     ports:
       - "1883:1883"    # Porta padrão MQTT

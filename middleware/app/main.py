@@ -3,6 +3,7 @@
 import os
 import logging
 import jwt
+import json 
 from fastapi import FastAPI, Header, HTTPException, status, Request, Depends
 
 # Importe o RpcClient do seu outro arquivo
@@ -167,3 +168,45 @@ async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status_code, detail=response['error'])
 
     return response
+
+# @app.post("/api/iots/disconnect/")
+# async def iot_disconnect(iot_pk: int, user: dict = Depends(get_current_user)):
+#     """Envia um comando para abrir a porta de um dispositivo IoT específico."""
+#     logger.info(f"Usuário '{user.get('username')}' solicitou abertura da porta para o IoT {iot_pk}.")
+    
+#     response = await rpc_client.call(
+#         'open_door_task', 
+#         (user, iot_pk), 
+#         queue='permission_queue'
+#     )
+
+#     if response.get('error'):
+#         status_code = response.get('status_code', 500)
+#         raise HTTPException(status_code=status_code, detail=response['error'])
+
+#     return response
+
+@app.post("/api/iots/connect/")
+async def iot_connect(request: Request):
+    try:
+        # Lê o corpo da requisição como JSON
+        payload = await request.json()
+        logger.info(f"📩 Webhook recebido: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+
+        # Aqui você pode processar o conteúdo do webhook
+        # Exemplo: repassar para o RabbitMQ via RPC
+        # response = await rpc_client.call(
+        #     'webhook_handler_task', 
+        #     payload,
+        #     queue='webhook_queue'
+        # )
+
+        # if response.get('error'):
+        #     logger.error(f"Erro ao processar webhook: {response['error']}")
+        #     raise HTTPException(status_code=500, detail=response['error'])
+
+        return {"status": "success"}
+
+    except Exception as e:
+        logger.exception("Erro ao processar webhook")
+        raise HTTPException(status_code=400, detail=f"Erro ao processar webhook: {str(e)}")
