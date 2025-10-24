@@ -49,16 +49,15 @@ services:
       - "EMQX_ALLOW_ANONYMOUS=true" # Apenas para desenvolvimento
     networks:
       - app-network
-    healthcheck:
-      test: ["CMD", "/opt/emqx/bin/emqx_ctl", "status"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
+    # healthcheck:
+    #   test: ["CMD", "nc", "-z", "localhost", "1883"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 10
 
   # ======================================================================================
   #                           Serviços de API (Interface)
   # ======================================================================================
-
   auth-service:
     build: ./api_autenticacao
     container_name: auth-service
@@ -92,7 +91,6 @@ services:
   # ======================================================================================
   #                           Serviços de Lógica (Workers)
   # ======================================================================================
-
   db-service:
     build: ./servico_banco_dados
     container_name: db-service
@@ -166,7 +164,7 @@ services:
       rabbitmq:
         condition: service_healthy
       emqx:
-        condition: service_healthy
+        condition: service_started
     networks:
       - app-network
 
