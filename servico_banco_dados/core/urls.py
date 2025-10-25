@@ -9,6 +9,7 @@ router.register(r'rooms', RoomViewSet, basename='room')
 router.register(r'iots', IOTViewSet, basename='iot')
 router.register(r'user-permissions', UserPermissionRoomViewSet)
 router.register(r'logs', LogEntryViewSet)
+router.register(r'iot-registration', IOTRegistrationViewSet, basename='iot-registration')
 
 urlpatterns = [
     path('', include(router.urls)),

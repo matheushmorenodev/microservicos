@@ -72,5 +72,73 @@ class UserPermissionRoomViewSet(viewsets.ModelViewSet):
 class LogEntryViewSet(viewsets.ModelViewSet):
     queryset = LogEntry.objects.all()
     serializer_class = LogEntrySerializer
-    
 
+class IOTRegistrationViewSet(viewsets.ViewSet):
+    """
+    ViewSet customizada para registrar ou atualizar um IOT.
+    Fornece uma ação 'register'.
+    """
+    
+    # IMPORTANTE: Adicione as permissões aqui quando estiver pronto
+    # permission_classes = [IsAuthenticated] 
+
+    @action(detail=False, methods=['post'], url_path='register')
+    def register_iot(self, request):
+        """
+        Recebe: { "name_iot", "name_room", "name_departament" }
+        e cria/atualiza o IOT e sua hierarquia.
+        """
+        data = request.data
+        name_iot = data.get('name_iot')
+        name_room = data.get('name_room')
+        name_departament = data.get('name_departament')
+
+        # 1. Validação simples da entrada
+        if not all([name_iot, name_room, name_departament]):
+            return Response(
+                {"error": "Os campos 'name_iot', 'name_room', e 'name_departament' são obrigatórios."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 2. Tenta encontrar o IOT
+            iot = IOT.objects.get(name=name_iot)
+            
+            # 3. Se existir, atualiza o status e retorna
+            iot.status = True
+            iot.save(update_fields=['status'])
+            
+            serializer = IOTSerializer(iot)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except IOT.DoesNotExist:
+            # 4. Se não existir, cria a hierarquia de forma atômica
+            try:
+                with transaction.atomic():
+                    # 4a. Garante que o Departamento exista
+                    department, _ = Department.objects.get_or_create(
+                        name=name_departament
+                    )
+                    
+                    # 4b. Garante que a Sala exista NAQUELE departamento
+                    room, _ = Room.objects.get_or_create(
+                        name=name_room,
+                        department=department
+                    )
+                    
+                    # 4c. Cria o IOT com status True (1)
+                    iot = IOT.objects.create(
+                        name=name_iot,
+                        room=room,
+                        status=True
+                    )
+                    
+                    serializer = IOTSerializer(iot)
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+            except Exception as e:
+                # Captura erros durante a transação (ex: falha de constraint)
+                return Response(
+                    {"error": f"Erro ao criar hierarquia: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
