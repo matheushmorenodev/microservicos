@@ -186,12 +186,53 @@ async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
 
 #     return response
 
-@app.post("/api/iots/connect/")
-async def iot_connect(request: Request):
+@app.post("/api/iots/connected/")
+async def iot_connected(request: Request):
+    try:
+        # Lê o corpo da requisição como JSON
+        payload = await request.json()
+        # logger.info(f"📩 Webhook recebido: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+
+        # Remove o campo 'clientid' do JSON
+        if 'clientid' in payload:
+            logger.info(f"Cliente conectado clientid: {payload['clientid']}")
+            # del payload['clientid']
+
+
+        # Precisamos fazer tres abordagens:
+        # 1. Adicionar/Atualizar o iot no banco de dados (via RPC) -> Precisamos estabelecer uma conexão com o Banco de dados -> Adicionar se caso não exista ou atualizar o status(status de conexão do microcontrolador com o broker MQTT) para conectado.
+        # 2. Enviar um comando do tipo subscribe para fila do door_service para que o microcontrolador comece a receber dados do status físico do dispositivo (ex: sensor de porta).
+        # 3. LOG
+
+        # Aqui você pode processar o conteúdo do webhook
+        # Exemplo: repassar para o RabbitMQ via RPC
+        # response = await rpc_client.call(
+        #     'webhook_handler_task', 
+        #     payload,
+        #     queue='webhook_queue'
+        # )
+
+        # if response.get('error'):
+        #     logger.error(f"Erro ao processar webhook: {response['error']}")
+        #     raise HTTPException(status_code=500, detail=response['error'])
+
+        return {"status": "success"}
+
+    except Exception as e:
+        logger.exception("Erro ao processar webhook")
+        raise HTTPException(status_code=400, detail=f"Erro ao processar webhook: {str(e)}")
+
+@app.post("/api/iots/disconnected/")
+async def iot_disconnected(request: Request):
     try:
         # Lê o corpo da requisição como JSON
         payload = await request.json()
         logger.info(f"📩 Webhook recebido: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+
+        # Precisamos fazer tres abordagens:
+        # 1. Atualizar o iot no banco de dados (via RPC) -> Precisamos estabelecer uma conexão com o Banco de dados -> Atualizar o status(status de conexão do microcontrolador com o broker MQTT) para conectado.
+        # 2. Enviar um comando do tipo unsubscribe para fila do door_service para parar de receber dados do status físico do dispositivo (ex: sensor de porta).
+        # 3. LOG
 
         # Aqui você pode processar o conteúdo do webhook
         # Exemplo: repassar para o RabbitMQ via RPC
