@@ -1,6 +1,6 @@
 services:
   # ======================================================================================
-  #                           Serviços de Infraestrutura
+  #                             Serviços de Infraestrutura
   # ======================================================================================
   postgres_db:
     image: postgres:13-alpine
@@ -25,10 +25,12 @@ services:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"   # Porta para os workers Celery
+      - "5672:5672"  # Porta para os workers Celery
       - "15672:15672" # Interface de gerenciamento
     networks:
       - app-network
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -36,7 +38,7 @@ services:
       retries: 10
 
   emqx:
-    image: emqx/emqx:5.1
+    image: emqx/emqx:5.8
     container_name: emqx
     ports:
       - "1883:1883"    # Porta padrão MQTT
@@ -46,26 +48,24 @@ services:
     environment:
       - "EMQX_NAME=emqx-node1"
       - "EMQX_HOST=emqx"
-      - "EMQX_ALLOW_ANONYMOUS=true" # Apenas para desenvolvimento
+      - "EMQX_ALLOW_ANONYMOUS=true"
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_etc:/opt/emqx/etc
+      - emqx_log:/opt/emqx/log
     networks:
       - app-network
-    # healthcheck:
-    #   test: ["CMD", "nc", "-z", "localhost", "1883"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 10
 
   # ======================================================================================
-  #                           Serviços de API (Interface)
+  #                            Serviços de API (Interface)
   # ======================================================================================
   auth-service:
     build: ./api_autenticacao
     container_name: auth-service
-    # AVISO: 'runserver' não é para produção. Use Gunicorn como no 'db-service'.
     command: python manage.py runserver 0.0.0.0:8001
     env_file: .env
     volumes:
-      - ./api_autenticacao:/app # Volume para hot-reload em dev
+      - ./api_autenticacao:/app
     ports:
       - "8001:8001"
     networks:
@@ -79,26 +79,25 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./middleware:/app # Volume para hot-reload em dev
+      - ./middleware:/app
     depends_on:
       rabbitmq:
         condition: service_healthy
-      permission-service: # Espera o worker de permissão iniciar
+      permission-service:
         condition: service_started
     networks:
       - app-network
 
   # ======================================================================================
-  #                           Serviços de Lógica (Workers)
+  #                            Serviços de Lógica (Workers)
   # ======================================================================================
   db-service:
     build: ./servico_banco_dados
     container_name: db-service
-    # Comando correto: executa migrações e inicia o servidor Gunicorn
-    command: sh -c "python manage.py migrate && gunicorn db_project.wsgi:application --bind 0.0.0.0:8002 --workers 3 --timeout 120"
-    env_file: .env # As variáveis de DB devem estar no seu arquivo .env
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8002"
+    env_file: .env
     volumes:
-      - ./servico_banco_dados:/app # Volume para hot-reload em dev
+      - ./servico_banco_dados:/app
     ports:
       - "8002:8002"
     environment:
@@ -109,7 +108,7 @@ services:
       - DB_PORT=5432
     restart: on-failure
     depends_on:
-      postgres_db: # Garante que o banco de dados esteja pronto
+      postgres_db:
         condition: service_healthy
     networks:
       - app-network
@@ -117,9 +116,7 @@ services:
   permission-service:
     build: ./permission_service
     container_name: permission-service
-    # AJUSTE CRÍTICO: Comando para rodar o worker Celery
-    # Aponta para o app 'tasks' e escuta a fila 'permission_queue'
-    command: celery -A tasks worker --loglevel=info -Q permission_queue
+    command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q permission_queue
     env_file: .env
     volumes:
       - ./permission_service:/app
@@ -135,9 +132,7 @@ services:
   log-service:
     build: ./log_service
     container_name: log-service
-    # AJUSTE CRÍTICO: Comando para rodar o worker Celery
-    # Aponta para o app 'tasks' e escuta a fila 'log_queue'
-    command: celery -A tasks worker --loglevel=info -Q log_queue
+    command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q log_queue
     env_file: .env
     volumes:
       - ./log_service:/app
@@ -153,11 +148,9 @@ services:
   door-service:
     build: ./door_service
     container_name: door-service
-    # AJUSTE CRÍTICO: Comando para rodar o worker Celery
-    # Aponta para o app 'tasks' e escuta a fila 'door_commands'
-    command: celery -A tasks worker --loglevel=info -Q door_commands
+    command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q door_commands
     restart: on-failure
-    env_file: .env # As variáveis de MQTT/DB devem estar no seu .env
+    env_file: .env
     volumes:
       - ./door_service:/app
     depends_on:
@@ -169,7 +162,7 @@ services:
       - app-network
 
 # ======================================================================================
-#                                 Redes e Volumes
+#                                Redes e Volumes
 # ======================================================================================
 networks:
   app-network:
@@ -177,4 +170,7 @@ networks:
 
 volumes:
   postgres_data:
-    # O driver 'local' é o padrão, não precisa ser especificado
+  emqx_data:
+  emqx_etc:
+  emqx_log:
+  rabbitmq_data:

@@ -115,7 +115,6 @@ async def list_departments(user: dict = Depends(get_current_user)):
 
     return response.get('result')
 
-
 @app.get("/api/departments/{department_pk}/rooms/")
 async def list_rooms(department_pk: int, user: dict = Depends(get_current_user)):
     """Lista as salas de um departamento específico, respeitando as permissões."""
@@ -131,7 +130,6 @@ async def list_rooms(department_pk: int, user: dict = Depends(get_current_user))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
 
     return response.get('result')
-
 
 @app.get("/api/rooms/{room_pk}/iots/")
 async def list_iots(room_pk: int, user: dict = Depends(get_current_user)):
@@ -151,7 +149,6 @@ async def list_iots(room_pk: int, user: dict = Depends(get_current_user)):
 
     return response.get('result')
 
-
 @app.post("/api/iots/{iot_pk}/open/")
 async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
     """Envia um comando para abrir a porta de um dispositivo IoT específico."""
@@ -168,23 +165,6 @@ async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status_code, detail=response['error'])
 
     return response
-
-# @app.post("/api/iots/disconnect/")
-# async def iot_disconnect(iot_pk: int, user: dict = Depends(get_current_user)):
-#     """Envia um comando para abrir a porta de um dispositivo IoT específico."""
-#     logger.info(f"Usuário '{user.get('username')}' solicitou abertura da porta para o IoT {iot_pk}.")
-    
-#     response = await rpc_client.call(
-#         'open_door_task', 
-#         (user, iot_pk), 
-#         queue='permission_queue'
-#     )
-
-#     if response.get('error'):
-#         status_code = response.get('status_code', 500)
-#         raise HTTPException(status_code=status_code, detail=response['error'])
-
-#     return response
 
 @app.post("/api/iots/connected/")
 async def iot_connected(request: Request):

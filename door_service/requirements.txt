@@ -2,3 +2,4 @@ celery
 requests
 paho-mqtt
 amqp
+watchdog
