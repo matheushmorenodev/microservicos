@@ -1,7 +1,6 @@
 # core/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from django.db import transaction
 from .views import (
     ActorUserViewSet,
     DepartmentViewSet,
@@ -9,7 +8,7 @@ from .views import (
     IOTViewSet,
     UserPermissionRoomViewSet,
     LogEntryViewSet,
-    IOTRegistrationViewSet
+    IOTConnectionViewSet
 )
 
 router = DefaultRouter()
@@ -19,8 +18,8 @@ router.register(r'rooms', RoomViewSet, basename='room')
 router.register(r'iots', IOTViewSet, basename='iot')
 router.register(r'user-permissions', UserPermissionRoomViewSet)
 router.register(r'logs', LogEntryViewSet)
-# Registro da nova viewset
-router.register(r'iot-registration', IOTRegistrationViewSet, basename='iot-registration')
+
+router.register(r'iot-connection', IOTConnectionViewSet, basename='iot-connection')
 
 urlpatterns = [
     path('', include(router.urls)),

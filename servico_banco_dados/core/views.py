@@ -57,12 +57,33 @@ class RoomViewSet(viewsets.ModelViewSet):
 class IOTViewSet(viewsets.ModelViewSet):
     serializer_class = IOTSerializer
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['name']
+    filterset_fields = ['name', 'status']
     def get_queryset(self):
-        queryset = IOT.objects.all()
-        room_pk = self.request.query_params.get('room_pk')
-        if room_pk is not None:
-            queryset = queryset.filter(room_id=room_pk)
+        """
+        Este método é chamado para obter a lista de itens.
+        Vamos modificá-lo para filtrar baseado nos parâmetros da URL.
+        """
+        # Começa com todos os objetos
+        queryset = IOT.objects.all() 
+        
+        # Pega os parâmetros da URL (ex: /api/seu-endpoint/?name=...)
+        name = self.request.query_params.get('name', None)
+        status = self.request.query_params.get('status', None)
+
+        # Se o parâmetro 'name' foi enviado na URL, filtra o queryset
+        if name is not None:
+            # 'name__icontains' faz uma busca "case-insensitive" (ignora maiúsculas/minúsculas)
+            # que contém o texto. Use 'name=name' se quiser correspondência exata.
+            queryset = queryset.filter(name__icontains=name)
+
+        # Se o parâmetro 'status' foi enviado na URL, filtra o queryset
+        if status is not None:
+            if status.lower() == 'true':
+                status = True
+            elif status.lower() == 'false':
+                status = False
+            queryset = queryset.filter(status=status)
+
         return queryset
 
 class UserPermissionRoomViewSet(viewsets.ModelViewSet):
@@ -70,35 +91,93 @@ class UserPermissionRoomViewSet(viewsets.ModelViewSet):
     serializer_class = UserPermissionRoomSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = UserPermissionRoomFilter
-    
+
 class LogEntryViewSet(viewsets.ModelViewSet):
     queryset = LogEntry.objects.all()
     serializer_class = LogEntrySerializer
 
-class IOTRegistrationViewSet(viewsets.ViewSet):
+class IOTConnectionViewSet(viewsets.ViewSet): 
     """
-    ViewSet customizada para registrar ou atualizar um IOT.
-    Fornece uma ação 'register'.
+    ViewSet customizada para gerenciar o status de conexão de um IOT.
+    Fornece as ações 'connect' e 'disconnect'.
     """
-    
-    # IMPORTANTE: Adicione as permissões aqui quando estiver pronto
     # permission_classes = [IsAuthenticated] 
 
-    @action(detail=False, methods=['post'], url_path='register')
-    def register_iot(self, request):
+    @action(detail=False, methods=['post'], url_path='connect')
+    def connect(self, request):
         """
-        Recebe: { "name_iot", "name_room", "name_departament" }
-        e cria/atualiza o IOT e sua hierarquia.
+        Recebe: { "name_iot", "name_room", "name_department" }
+        
+        Se o IOT existir, marca status=True.
+        Se não existir, cria a hierarquia (Dept, Room, IOT) e marca status=True.
         """
         data = request.data
         name_iot = data.get('name_iot')
         name_room = data.get('name_room')
-        name_departament = data.get('name_departament')
+        name_department = data.get('name_department')
 
-        # 1. Validação simples da entrada
-        if not all([name_iot, name_room, name_departament]):
+        print("Dados recebidos para conectar IOT:", data)
+
+        if not all([name_iot, name_room, name_department]):
             return Response(
-                {"error": "Os campos 'name_iot', 'name_room', e 'name_departament' são obrigatórios."},
+                {"error": "Os campos 'name_iot', 'name_room', e 'name_department' são obrigatórios."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            iot = IOT.objects.get(name=name_iot)
+            iot.status = True
+            iot.save(update_fields=['status'])
+            serializer = IOTSerializer(iot)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except IOT.DoesNotExist:
+            try:
+                with transaction.atomic():
+                    department, _ = Department.objects.get_or_create(name=name_department)
+                    room, _ = Room.objects.get_or_create(name=name_room, department=department)
+                    iot = IOT.objects.create(name=name_iot, room=room, status=True)
+                    serializer = IOTSerializer(iot)
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response(
+                    {"error": f"Erro ao criar hierarquia: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+    
+    @action(detail=False, methods=['post'], url_path='disconnect')
+    def disconnect(self, request):
+        """
+        Recebe: { "name_iot" }
+        e atualiza o status desse IOT para False (desconectado).
+        """
+        data = request.data
+        name_iot = data.get('name_iot')
+
+        if not name_iot:
+            return Response(
+                {"error": "O campo 'name_iot' é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            iot = IOT.objects.get(name=name_iot)
+            iot.status = False
+            iot.save(update_fields=['status'])
+            serializer = IOTSerializer(iot)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except IOT.DoesNotExist:
+            return Response(
+                {"error": f"IOT com o nome '{name_iot}' não encontrado."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        data = request.data
+        name_iot = data.get('name_iot')
+
+        # 1. Validação
+        if not name_iot:
+            return Response(
+                {"error": "O campo 'name_iot' é obrigatório."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -106,41 +185,16 @@ class IOTRegistrationViewSet(viewsets.ViewSet):
             # 2. Tenta encontrar o IOT
             iot = IOT.objects.get(name=name_iot)
             
-            # 3. Se existir, atualiza o status e retorna
-            iot.status = True
+            # 3. Se existir, atualiza o status para False e retorna
+            iot.status = False
             iot.save(update_fields=['status'])
             
             serializer = IOTSerializer(iot)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         except IOT.DoesNotExist:
-            # 4. Se não existir, cria a hierarquia de forma atômica
-            try:
-                with transaction.atomic():
-                    # 4a. Garante que o Departamento exista
-                    department, _ = Department.objects.get_or_create(
-                        name=name_departament
-                    )
-                    
-                    # 4b. Garante que a Sala exista NAQUELE departamento
-                    room, _ = Room.objects.get_or_create(
-                        name=name_room,
-                        department=department
-                    )
-                    
-                    # 4c. Cria o IOT com status True (1)
-                    iot = IOT.objects.create(
-                        name=name_iot,
-                        room=room,
-                        status=True
-                    )
-                    
-                    serializer = IOTSerializer(iot)
-                    return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
-            except Exception as e:
-                # Captura erros durante a transação (ex: falha de constraint)
-                return Response(
-                    {"error": f"Erro ao criar hierarquia: {str(e)}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+            # 4. Se não existir, retorna erro
+            return Response(
+                {"error": f"IOT com o nome '{name_iot}' não encontrado."},
+                status=status.HTTP_404_NOT_FOUND
+            )
