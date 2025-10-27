@@ -169,38 +169,51 @@ async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
 @app.post("/api/iots/connected/")
 async def iot_connected(request: Request):
     try:
-        # Lê o corpo da requisição como JSON
         payload = await request.json()
-        # logger.info(f"📩 Webhook recebido: {json.dumps(payload, indent=2, ensure_ascii=False)}")
 
-        # Remove o campo 'clientid' do JSON
         if 'clientid' in payload:
-            logger.info(f"Cliente conectado clientid: {payload['clientid']}")
-            # del payload['clientid']
+            client_id_string = payload['clientid']
+            logger.info(f"Cliente conectado clientid: {client_id_string}")
 
+            try:
+                name_department, name_room, name_iot = client_id_string.split('/')
+                logger.info(f"Parse do clientid: Department='{name_department}', Room='{name_room}', IoT='{name_iot}'")
+                topic_to_subscribe = f"{name_department}/{name_room}/{name_iot}/status"
+                
+                command_payload = {
+                    "action": "subscribe",
+                    "topic": topic_to_subscribe,
+                    "qos": 1
+                }
+                
+                try:
+                    await rpc_client.call(
+                        'process_command', 
+                        command_payload,
+                        queue='door_commands'
+                    )
 
-        # Precisamos fazer tres abordagens:
-        # 1. Adicionar/Atualizar o iot no banco de dados (via RPC) -> Precisamos estabelecer uma conexão com o Banco de dados -> Adicionar se caso não exista ou atualizar o status(status de conexão do microcontrolador com o broker MQTT) para conectado.
-        # 2. Enviar um comando do tipo subscribe para fila do door_service para que o microcontrolador comece a receber dados do status físico do dispositivo (ex: sensor de porta).
-        # 3. LOG
+                    logger.info(f"Tarefa 'subscribe' enviada para 'door_commands' para o tópico: {topic_to_subscribe}")
+                
+                except Exception as celery_e:
+                    logger.exception(f"Falha ao enviar tarefa 'subscribe' para o Celery (broker): {celery_e}")
+                    raise HTTPException(status_code=500, detail="Falha ao registrar inscrição do IoT no message broker.")
+            except ValueError:
+                logger.warning(f"Formato inesperado do clientid: {client_id_string}. Esperado 'name_department/name_room/name_iot'.")
+                raise HTTPException(status_code=400, detail=f"Formato inválido do clientid: {client_id_string}. Esperado 'name_department/name_room/name_iot'.")
+        
+        else:
+            logger.warning("Webhook recebido sem 'clientid'.")
+            raise HTTPException(status_code=400, detail="Payload do webhook não contém 'clientid'.")
 
-        # Aqui você pode processar o conteúdo do webhook
-        # Exemplo: repassar para o RabbitMQ via RPC
-        # response = await rpc_client.call(
-        #     'webhook_handler_task', 
-        #     payload,
-        #     queue='webhook_queue'
-        # )
-
-        # if response.get('error'):
-        #     logger.error(f"Erro ao processar webhook: {response['error']}")
-        #     raise HTTPException(status_code=500, detail=response['error'])
-
+        # Se tudo deu certo
         return {"status": "success"}
 
+    except HTTPException as http_e:
+        raise http_e
     except Exception as e:
         logger.exception("Erro ao processar webhook")
-        raise HTTPException(status_code=400, detail=f"Erro ao processar webhook: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao processar webhook: {str(e)}")
 
 @app.post("/api/iots/disconnected/")
 async def iot_disconnected(request: Request):
