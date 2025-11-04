@@ -56,8 +56,8 @@ def call_db_service(endpoint: str, params: Optional[Dict] = None) -> List[Dict]:
 def get_active_iot_topics() -> List[str]:
     """Obtém a lista de tópicos MQTT associados a IoTs ativos."""
     logger.info("Buscando IoTs ativos no db-service...")
-    active_iots = call_db_service('iots', params={'is_active': 'true'})
-    # O tópico 'status' é para receber dados do dispositivo
+    active_iots = call_db_service('iots', params={'status': 'true'})
+    logger.info(f"{len(active_iots)} IoTs ativos encontrados.")
     topics = [f"campus/geral/{iot.get('name')}/status" for iot in active_iots if iot.get('name')]
     logger.info(f"{len(topics)} tópicos ativos encontrados para inscrição.")
     return topics
@@ -77,17 +77,15 @@ def send_log_task(level: str, message: str) -> None:
 #                                 TAREFAS CELERY
 # =========================================================================================================
 
-# MELHORIA AQUI: Tornando a tarefa robusta a falhas de rede e MQTT
 @app.task(
     name='process_command',
-    autoretry_for=(MQTTConnectionError,), # Tenta novamente se o MQTT estiver desconectado
+    autoretry_for=(MQTTConnectionError,),
     retry_backoff=True,
-    max_retries=10 # Tenta por mais tempo, pois a conexão MQTT pode demorar a voltar
+    max_retries=10
 )
 def process_command(command_data: dict) -> Optional[str]:
     """Processa comandos recebidos da fila 'door_commands'."""
     
-    # MELHORIA AQUI: Garante que estamos conectados antes de processar
     if not mqtt_client.is_connected():
         raise MQTTConnectionError("Cliente MQTT não está conectado. Aguardando reconexão...")
 
@@ -134,7 +132,6 @@ def process_command(command_data: dict) -> Optional[str]:
         # Relançar a exceção pode ser útil para monitoramento
         raise
 
-# MELHORIA AQUI: Tornando a tarefa de sincronização robusta
 @app.task(
     name='sync_subscriptions',
     autoretry_for=(requests.RequestException,), # Tenta novamente se o db-service estiver offline
@@ -149,8 +146,7 @@ def sync_subscriptions() -> str:
         if not active_topics:
             logger.warning("Nenhum tópico ativo encontrado para sincronizar.")
             return "Nenhum tópico ativo."
-        
-        # O cliente Paho MQTT lida com re-inscrições de forma inteligente
+
         for topic in active_topics:
             mqtt_client.subscribe(topic)
         
@@ -168,9 +164,7 @@ def sync_subscriptions() -> str:
 @app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     logger.info("Worker inicializado. Executando sincronização inicial de tópicos MQTT.")
-    # Executa a primeira sincronização na inicialização
-    sender.add_periodic_task(10.0, sync_subscriptions.s(), name='Initial sync', expires=15)
-
-    # MELHORIA AQUI: Ativando a tarefa periódica
-    # Sincroniza a cada 5 minutos para pegar novos dispositivos ou mudanças de status
-    sender.add_periodic_task(300.0, sync_subscriptions.s(), name='Sync subscriptions every 5 minutes')
+    try:
+        sync_subscriptions()
+    except Exception as e:
+        logger.error(f"Falha ao sincronizar tópicos na inicialização: {e}")
