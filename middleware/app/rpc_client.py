@@ -6,7 +6,7 @@ import logging
 from asyncio import Future
 from typing import Any, Coroutine, Optional
 import uuid
-from aio_pika import connect, Message, IncomingMessage
+from aio_pika import connect, Message, IncomingMessage, DeliveryMode
 from aio_pika.abc import AbstractConnection, AbstractChannel, AbstractQueue
 from aiormq.exceptions import AMQPError, ChannelInvalidStateError, ConnectionClosed
 from fastapi import HTTPException
@@ -157,3 +157,54 @@ class RpcClient:
             # Remove a future para não vazar memória
             self.futures.pop(correlation_id, None)
             raise HTTPException(status_code=504, detail="Timeout: A tarefa demorou muito para responder.")
+    
+    async def publish_fire_and_forget(self, task_name: str, payload: Any, queue: Optional[str] = None):
+        """
+        Publica uma tarefa no estilo 'Fire and Forget' (sem esperar resposta).
+        """
+        
+        # Garante que estamos conectados
+        try:
+            await self._ensure_connection()
+        except Exception as e:
+            logger.error(f"Publicador [F/F]: Falha ao garantir conexão: {e}")
+            raise HTTPException(status_code=503, detail="Serviço indisponível (Message Broker)")
+
+        if not self.channel:
+             raise RuntimeError("RPC Client não está inicializado corretamente.")
+
+        correlation_id = str(uuid.uuid4())
+        routing_key = queue or self.default_queue_name
+
+        message_body = {
+            'id': correlation_id,
+            'task': task_name,
+            'args': payload if isinstance(payload, (list, tuple)) else [payload],
+            'kwargs': {}
+        }
+
+        try:
+            # Publica a mensagem sem 'reply_to'
+            await self.channel.default_exchange.publish(
+                Message(
+                    json.dumps(message_body).encode(),
+                    content_type='application/json',
+                    correlation_id=correlation_id,
+                    delivery_mode=DeliveryMode.PERSISTENT
+                ),
+                routing_key=routing_key,
+            )
+            logger.info(f"Publicada tarefa [Fire/Forget] '{task_name}' (ID: {correlation_id}) para fila '{routing_key}'")
+        
+        except (ConnectionClosed, ChannelInvalidStateError, AMQPError, RuntimeError) as e:
+            logger.warning(f"Publicador [F/F]: Conexão perdida. Tentando reconectar. Erro: {e}")
+            # Limpa a conexão para forçar reconexão na próxima tentativa
+            await self.close() 
+            # Para F/F, podemos falhar rápido aqui e deixar o HTTP 500
+            # A alternativa seria tentar publicar novamente, como no 'call',
+            # mas isso pode atrasar o webhook.
+            raise HTTPException(status_code=503, detail="Serviço indisponível (Message Broker) ao tentar publicar.")
+        
+        except Exception as e:
+            logger.error(f"Publicador [F/F]: Erro inesperado ao publicar: {e}")
+            raise HTTPException(status_code=500, detail="Erro interno do publicador.")

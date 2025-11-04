@@ -171,9 +171,9 @@ async def iot_connected(request: Request):
     try:
         payload = await request.json()
 
-        if 'clientid' in payload:
-            client_id_string = payload['clientid']
-            logger.info(f"Cliente conectado clientid: {client_id_string}")
+        if not client_id_string or client_id_string == "door_service_bridge":
+            logger.info(f"Evento de conexão ignorado para o clientid: {client_id_string}")
+            return {"status": "success", "detail": "Ignored service client"}
 
             try:
                 name_department, name_room, name_iot = client_id_string.split('/')
@@ -187,17 +187,19 @@ async def iot_connected(request: Request):
                 }
                 
                 try:
-                    await rpc_client.call(
+                    await rpc_client.publish_fire_and_forget(
                         'process_command', 
                         command_payload,
                         queue='door_commands'
                     )
 
-                    logger.info(f"Tarefa 'subscribe' enviada para 'door_commands' para o tópico: {topic_to_subscribe}")
-                
-                except Exception as celery_e:
-                    logger.exception(f"Falha ao enviar tarefa 'subscribe' para o Celery (broker): {celery_e}")
-                    raise HTTPException(status_code=500, detail="Falha ao registrar inscrição do IoT no message broker.")
+                    logger.info(f"Tarefa 'subscribe' [Fire/Forget] enviada para 'door_commands' para o tópico: {topic_to_subscribe}")
+                except HTTPException as http_e:
+                    raise http_e
+                except Exception as publish_e:
+                    # Pega qualquer outro erro inesperado
+                    logger.exception(f"Falha inesperada ao enfileirar tarefa 'subscribe' [Fire/Forget]: {publish_e}")
+                    raise HTTPException(status_code=500, detail="Falha ao enfileirar tarefa para o message broker.")
             except ValueError:
                 logger.warning(f"Formato inesperado do clientid: {client_id_string}. Esperado 'name_department/name_room/name_iot'.")
                 raise HTTPException(status_code=400, detail=f"Formato inválido do clientid: {client_id_string}. Esperado 'name_department/name_room/name_iot'.")
@@ -220,7 +222,10 @@ async def iot_disconnected(request: Request):
     try:
         # Lê o corpo da requisição como JSON
         payload = await request.json()
-        logger.info(f"📩 Webhook recebido: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+
+        if 'clientid' in payload:
+            client_id_string = payload['clientid']
+            logger.info(f"Cliente desconectado clientid: {client_id_string}")
 
         # Precisamos fazer tres abordagens:
         # 1. Atualizar o iot no banco de dados (via RPC) -> Precisamos estabelecer uma conexão com o Banco de dados -> Atualizar o status(status de conexão do microcontrolador com o broker MQTT) para conectado.
