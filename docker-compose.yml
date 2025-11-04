@@ -78,6 +78,8 @@ services:
     env_file: .env
     ports:
       - "8000:8000"
+    environment:
+      - DB_SERVICE_URL=http://db-service:8002/
     volumes:
       - ./middleware:/app
     depends_on:
