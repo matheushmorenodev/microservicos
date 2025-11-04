@@ -2,3 +2,4 @@ fastapi==0.85.0
 uvicorn==0.18.3
 aio-pika==8.2.5
 PyJWT==2.6.0
+httpx
