@@ -112,6 +112,12 @@ services:
         condition: service_healthy
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('localhost', 8002))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
 
   permission-service:
     build: ./permission_service
@@ -123,7 +129,7 @@ services:
     restart: on-failure
     depends_on:
       db-service:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
@@ -141,26 +147,53 @@ services:
       rabbitmq:
         condition: service_healthy
       db-service:
-        condition: service_started
+        condition: service_healthy
     networks:
       - app-network
 
-  door-service:
-    build: ./door_service
-    container_name: door-service
-    command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q door_commands
-    restart: on-failure
-    env_file: .env
-    volumes:
-      - ./door_service:/app
+  # door-service:
+  #   build: ./door_service
+  #   container_name: door-service
+  #   command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q door_commands
+  #   restart: on-failure
+  #   env_file: .env
+  #   volumes:
+  #     - ./door_service:/app
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     emqx:
+  #       condition: service_started
+  #     db-service:
+  #       condition: service_healthy
+  #   networks:
+  #     - app-network
+
+  door_bridge_service:
+    # Constrói a imagem a partir do Dockerfile no diretório atual
+    build: ./door_service_teste
+    # Ou, se você já construiu manualmente:
+    # image: door-bridge-service:latest
+    container_name: door_bridge_service
+    restart: unless-stopped
+    # Define as variáveis de ambiente que o 'config.py' irá ler
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - MQTT_BROKER_HOST=emqx
+      - DB_SERVICE_URL=http://db-service:8002/api
+      # Descomente se suas credenciais do RabbitMQ não forem 'guest:guest'
+      # - RABBITMQ_USER=user
+      # - RABBITMQ_PASS=pass
+    # Conecta o serviço à rede da aplicação
+    networks:
+      - app-network
     depends_on:
       rabbitmq:
         condition: service_healthy
       emqx:
         condition: service_started
-    networks:
-      - app-network
-
+      db-service:
+        condition: service_healthy
 # ======================================================================================
 #                                Redes e Volumes
 # ======================================================================================

@@ -1,0 +1,6 @@
+# requirements.txt
+aio-pika
+aiohttp
+watchdog
+aiomqtt
+paho-mqtt==1.6.1
