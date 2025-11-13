@@ -95,18 +95,26 @@ class BridgeService:
         except asyncio.CancelledError:
             logger.info("Loop de sincronização periódica cancelado.")
 
-    async def _publish_rpc_response(self, channel: aio_pika.abc.AbstractChannel, reply_to: str, correlation_id: str, response_data: Dict[str, Any]):
-        """Publica uma resposta de RPC de volta para o solicitante."""
+    async def _publish_rpc_response(self, reply_to: str, correlation_id: str, response_data: Dict[str, Any]):
+        """Publica uma resposta de RPC de volta para o solicitante (de forma robusta)."""
+        
+        if not self.amqp_connection or self.amqp_connection.is_closed:
+            logger.error("Não é possível enviar resposta RPC: Conexão AMQP está fechada.")
+            return
+
         try:
-            await channel.default_exchange.publish(
-                aio_pika.Message(
-                    body=json.dumps(response_data).encode(),
-                    correlation_id=correlation_id
-                ),
-                routing_key=reply_to
-            )
+            # Cria um canal temporário apenas para esta resposta.
+            # Isto é mais robusto do que reutilizar o canal do consumidor.
+            async with self.amqp_connection.channel() as channel:
+                await channel.default_exchange.publish(
+                    aio_pika.Message(
+                        body=json.dumps(response_data).encode(),
+                        correlation_id=correlation_id
+                    ),
+                    routing_key=reply_to
+                )
         except Exception as e:
-            logger.error(f"Falha ao enviar resposta RPC para {reply_to}: {e}")
+            logger.error(f"Falha ao enviar resposta RPC para {reply_to}: {e}", exc_info=True)
 
     async def process_command(self, message: AbstractIncomingMessage):
         """Processa um comando recebido da fila AMQP 'door_commands'."""
@@ -115,20 +123,40 @@ class BridgeService:
             response_data = None
             status = "success"
             error_message = None
+            command = None  # Variável unificada para o comando
 
             try:
                 command_data = json.loads(message.body.decode())
                 logger.info(f"Comando recebido: {command_data}")
                 
-                # Acessando os args diretamente
-                args = command_data.get("args", [])
+                # --- INÍCIO DA LÓGICA DE EXTRAÇÃO ---
+                # Identifica o formato da mensagem para extrair o comando real.
                 
-                # Supondo que 'args' tenha a estrutura adequada para o comando
-                if args:
-                    action = args[0].get("action")
-                    topic = args[0].get("topic")
-                else:
-                    raise ValueError("Os argumentos 'args' não foram encontrados.")
+                if isinstance(command_data, dict):
+                    # Formato 1 (Ex: 'subscribe' vindo de uma tarefa Celery)
+                    # Espera: {'id': ..., 'args': [{'action': 'subscribe', ...}]}
+                    args = command_data.get("args", [])
+                    if args and isinstance(args, list) and len(args) > 0:
+                        command = args[0] # Pega o primeiro comando da lista 'args'
+                    
+                elif isinstance(command_data, list):
+                    # Formato 2 (Ex: 'publish' vindo de args diretos)
+                    # Espera: [[{'action': 'publish', ...}], {}, {...}]
+                    if len(command_data) > 0 and isinstance(command_data[0], list) and len(command_data[0]) > 0:
+                        command = command_data[0][0] # Pega o primeiro comando da primeira lista
+                
+                # Validação final
+                if not command or not isinstance(command, dict):
+                    raise ValueError(f"Não foi possível extrair um dicionário de comando válido. Dados recebidos: {command_data}")
+                # --- FIM DA LÓGICA DE EXTRAÇÃO ---
+
+                
+                # Todo o código agora usa a variável 'command'
+                action = command.get("action")
+                topic = command.get("topic")
+
+                if not action:
+                    raise ValueError("O dicionário de comando não contém a chave 'action'.")
 
                 log_msg = f"Processando comando: {action}"
                 if topic:
@@ -139,14 +167,16 @@ class BridgeService:
                     raise ValueError("Campo 'topic' é obrigatório para esta ação.")
 
                 if action == "publish":
-                    payload = command_data.get("payload", "{}")
-                    qos = int(command_data.get("qos", 1))
-                    retain = bool(command_data.get("retain", False))
+                    # CORREÇÃO: Lendo 'payload', 'qos', 'retain' do 'command'
+                    payload = command.get("payload", "{}")
+                    qos = int(command.get("qos", 1))
+                    retain = bool(command.get("retain", False))
                     await self.mqtt_client.publish(topic, payload, qos, retain)
                     await self.send_log('INFO', f"Publicado em '{topic}': {payload}")
 
                 elif action == "subscribe":
-                    qos = int(command_data.get("qos", 1))
+                    # CORREÇÃO: Lendo 'qos' do 'command'
+                    qos = int(command.get("qos", 1))
                     await self.mqtt_client.subscribe(topic, qos)
                     await self.send_log('INFO', f"Inscrito no tópico: '{topic}'")
 
@@ -175,19 +205,18 @@ class BridgeService:
                 # A mensagem será "nackada" automaticamente pelo 'async with'
 
             # Se for uma chamada RPC (tiver reply_to), envia a resposta
-            if message.reply_to and message.channel:
+            if message.reply_to:
                 rpc_response = {
                     "status": status,
                     "data": response_data,
                     "error": error_message
                 }
+                # CORREÇÃO: Chamada para o método RPC robusto (sem 'message.channel')
                 await self._publish_rpc_response(
-                    message.channel,
                     message.reply_to,
                     message.correlation_id,
                     rpc_response
                 )
-
 
     async def start_amqp_consumer(self):
         """Inicia o consumidor da fila de comandos AMQP."""

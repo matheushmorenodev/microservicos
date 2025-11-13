@@ -373,36 +373,95 @@ def list_iots_task(self, user_data, room_pk):
 def open_door_task(self, user_data, iot_pk):
     correlation_id = self.request.id
     username = user_data.get('username', 'unknown')
-    
+    user_id = user_data.get('id')
+    user_type = user_data.get('tipo_vinculo', 'Aluno')
+
     log_manager.info(
         action="open_door", 
         user=username, 
         status="STARTED", 
-        details=f"IoT: {iot_pk}", 
+        details=f"IoT: {iot_pk}, UserType: {user_type}",
         cid=correlation_id
     )
     
     try:
         # 1. Obter informações do IoT
         iot_info = call_db_service(f'iots/{iot_pk}', cid=correlation_id)
-        room_pk = iot_info.get('room', {}).get('id')
-        iot_name = iot_info.get('name')
-        command_topic = iot_info.get('command_topic')
 
-        if not all([room_pk, iot_name, command_topic]):
-            missing = [k for k in ['room_pk', 'iot_name', 'command_topic'] if not locals().get(k)]
-            details = f"Dados incompletos do db-service para IOT {iot_pk}. Faltando: {missing}"
-            log_manager.error(action="open_door", user=username, status="FAILURE", details=details, cid=correlation_id)
+        # 1a. Checagem de robustez: O db-service retornou algo?
+        if not iot_info or not isinstance(iot_info, dict):
+            details = f"call_db_service para 'iots/{iot_pk}' retornou uma resposta inesperada ou vazia: {iot_info}"
+            log_manager.error(action="open_door", user=username, status="FAILURE_SYSTEM", details=details, cid=correlation_id)
             raise Exception(details)
 
-        # 2. Verificar permissão
-        params = {'user': user_data.get('id'), 'room': room_pk}
-        permission_info = call_db_service('user-permissions', params=params, cid=correlation_id)
+        # 2. Extrair dados
+        iot_status = iot_info.get('status')
+        iot_name = iot_info.get('name')
         
-        if not permission_info:
-            raise PermissionError(f"Acesso negado: Usuário não tem permissão para a sala {room_pk}.")
+        # Extração segura dos dados aninhados
+        room_info = iot_info.get('room', {})
+        room_pk = room_info.get('id')
+        room_name = room_info.get('name')
+        
+        department_name = room_info.get('department', {}).get('name')
 
-        # 3. Enviar o comando
+        # 2a. Checar se temos os dados para construir o tópico e checar permissão
+        data_check = {
+            'room_pk': room_pk,
+            'iot_name': iot_name,
+            'room_name': room_name,
+            'department_name': department_name,
+            'iot_status': iot_status # Também checamos se o status veio
+        }
+        # Constrói uma lista apenas com os campos que são None ou vazios
+        missing = [key for key, value in data_check.items() if value is None] # Checa especificamente por None
+
+        if missing:
+            details = f"Dados incompletos do db-service para IOT {iot_pk}. Faltando: {missing}"
+            log_manager.error(action="open_door", user=username, status="FAILURE_SYSTEM", details=details, cid=correlation_id)
+            raise Exception(details)
+            
+        # 2b. Construir o command_topic dinamicamente
+        command_topic = f"{department_name}/{room_name}/{iot_name}/comando"
+        
+        log_manager.info(
+            action="open_door", 
+            user=username, 
+            status="DATA_VALIDATED", 
+            details=f"Tópico de comando construído: {command_topic}", 
+            cid=correlation_id
+        )
+
+        # 3. (REGRA) Checar se o IoT está online
+        if iot_status is not True: # Checa explicitamente se é True
+            raise PermissionError(f"Acesso negado: O dispositivo IoT '{iot_name}' (ID: {iot_pk}) está offline (status=false).")
+
+        # 4. (REGRA) Verificar permissão APENAS se não for Servidor
+        if user_type != 'Servidor':
+            log_manager.info(
+                action="open_door", 
+                user=username, 
+                status="CHECKING_PERMS", 
+                details=f"Usuário não é Servidor. Verificando permissão para a sala {room_pk}.", 
+                cid=correlation_id
+            )
+            
+            params = {'user': user_id, 'room': room_pk}
+            permission_info = call_db_service('user-permissions', params=params, cid=correlation_id)
+            
+            if not permission_info:
+                raise PermissionError(f"Acesso negado: Usuário {username} não tem permissão para a sala {room_pk}.")
+        
+        else:
+            log_manager.info(
+                action="open_door", 
+                user=username, 
+                status="BYPASSING_PERMS", 
+                details=f"Usuário é Servidor. Permissão para a sala {room_pk} concedida.", 
+                cid=correlation_id
+            )
+
+        # 5. Enviar o comando
         command_to_send = {
             "action": "publish",
             "topic": command_topic,
@@ -426,7 +485,7 @@ def open_door_task(self, user_data, iot_pk):
         log_manager.warning(
             action="open_door", 
             user=username, 
-            status="FAILURE", 
+            status="FAILURE_FORBIDDEN",
             details=f"Reason: {e}", 
             cid=correlation_id
         )
@@ -436,7 +495,7 @@ def open_door_task(self, user_data, iot_pk):
         log_manager.error(
             action="open_door", 
             user=username, 
-            status="FAILURE", 
+            status="FAILURE_SYSTEM",
             details=f"Reason: {e}", 
             cid=correlation_id
         )
