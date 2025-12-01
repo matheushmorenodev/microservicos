@@ -15,7 +15,7 @@ app = Celery('log_service')
 app.config_from_object('celeryconfig')
 
 # URL do serviço de banco de dados, agora vinda de variáveis de ambiente
-DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db-service:8002/api")
+DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://servico-banco-dados:8002/api")
 
 # =======================================================================================================================
 #                             Tarefas Celery principais do serviço de log

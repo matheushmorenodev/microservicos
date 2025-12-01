@@ -2,11 +2,8 @@ import os
 import logging
 import jwt
 import json 
-import httpx # 1. Importe o cliente HTTP assíncrono
+import httpx
 from fastapi import FastAPI, Header, HTTPException, status, Request, Depends
-# from contextlib import asynccontextmanager # <- Removido
-
-# Importe o RpcClient do seu outro arquivo
 from .rpc_client import RpcClient
 
 # ======================================================================================
@@ -30,10 +27,8 @@ if not DB_SERVICE_URL:
 #                             INICIALIZAÇÃO DO APP
 # ======================================================================================
 
-# 1. Defina o app ANTES de usar os decoradores
 app = FastAPI()
 
-# 2. Instancie o cliente RPC
 rpc_client = RpcClient('amqp://guest:guest@rabbitmq:5672//')
 
 # ======================================================================================
@@ -64,12 +59,12 @@ async def shutdown_event():
     logger.info("Conexão RPC fechada.")
 
 # ======================================================================================
-#               FUNÇÃO AUXILIAR DE COMUNICAÇÃO COM DB-SERVICE
+#               FUNÇÃO AUXILIAR DE COMUNICAÇÃO COM servico-banco-dados
 # ======================================================================================
 
 async def update_iot_status_in_db(request: Request, endpoint: str, payload: dict):
     """
-    Envia uma atualização (POST) para o db-service de forma "fire-and-forget".
+    Envia uma atualização (POST) para o servico-banco-dados de forma "fire-and-forget".
     Usa o cliente HTTP anexado ao app.state.
     """
     # Acessa o cliente HTTP a partir do estado do app, via objeto 'request'
@@ -86,14 +81,13 @@ async def update_iot_status_in_db(request: Request, endpoint: str, payload: dict
     except httpx.RequestError as e:
         logger.warning(f"AVISO: Falha de comunicação ao atualizar status do IoT em {e.request.url!r}: {e}")
     except httpx.HTTPStatusError as e:
-        logger.warning(f"AVISO: db-service retornou erro {e.response.status_code} ao atualizar status do IoT: {e.response.text}")
+        logger.warning(f"AVISO: servico-banco-dados retornou erro {e.response.status_code} ao atualizar status do IoT: {e.response.text}")
     except Exception as e:
         logger.error(f"Erro inesperado em update_iot_status_in_db: {e}")
 
 # ======================================================================================
 #                         AUTENTICAÇÃO E INJEÇÃO DE DEPENDÊNCIA
 # ======================================================================================
-# (Nenhuma mudança nesta seção)
 
 def get_user_from_token(token: str) -> dict:
     """Decodifica o token JWT e retorna o payload ou levanta uma HTTPException."""
@@ -142,7 +136,6 @@ async def get_current_user(request: Request, authorization: str = Header(None)) 
 # ======================================================================================
 #                                 ENDPOINTS DA API (Rotas Seguras)
 # ======================================================================================
-# (Nenhuma mudança nesta seção)
 
 @app.get("/api/departments/")
 async def list_departments(user: dict = Depends(get_current_user)):
@@ -179,11 +172,19 @@ async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status_code, detail=response['error'])
     return response
 
+@app.get("/api/iots/{iot_pk}/status/")
+async def get_iot_status(iot_pk: int, user: dict = Depends(get_current_user)):
+    logger.info(f"Usuário '{user.get('username')}' solicitou status do IoT {iot_pk}.")
+    response = await rpc_client.call('get_door_status_task', (user, iot_pk), queue='permission_queue')
+    if response.get('error'):
+        status_code = response.get('status_code', 500)
+        raise HTTPException(status_code=status_code, detail=response['error'])
+        
+    return response
+
 # ======================================================================================
 #                       ENDPOINTS DA API (Webhooks MQTT)
 # ======================================================================================
-# (Nenhuma mudança nesta seção, eles agora funcionarão)
-
 @app.post("/api/iots/connected/")
 async def iot_connected(request: Request):
     """
@@ -242,7 +243,6 @@ async def iot_connected(request: Request):
     except Exception as e:
         logger.exception("Erro crítico ao processar webhook 'connected'")
         return {"status": "error", "detail": str(e)}, status.HTTP_200_OK
-
 
 @app.post("/api/iots/disconnected/")
 async def iot_disconnected(request: Request):

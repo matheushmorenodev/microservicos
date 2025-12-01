@@ -55,7 +55,7 @@ class BridgeService:
 
     async def sync_subscriptions(self):
         """
-        Busca tópicos ativos no db-service e se inscreve neles.
+        Busca tópicos ativos no servico-banco-dados e se inscreve neles.
         """
         logger.info("Sincronizando inscrições MQTT...")
         if not self.http_session:
@@ -129,26 +129,28 @@ class BridgeService:
                 command_data = json.loads(message.body.decode())
                 logger.info(f"Comando recebido: {command_data}")
                 
-                # --- INÍCIO DA LÓGICA DE EXTRAÇÃO ---
-                # Identifica o formato da mensagem para extrair o comando real.
-                
                 if isinstance(command_data, dict):
-                    # Formato 1 (Ex: 'subscribe' vindo de uma tarefa Celery)
-                    # Espera: {'id': ..., 'args': [{'action': 'subscribe', ...}]}
-                    args = command_data.get("args", [])
-                    if args and isinstance(args, list) and len(args) > 0:
-                        command = args[0] # Pega o primeiro comando da lista 'args'
+                    # CENÁRIO 1: Formato Direto (RPC via Pika)
+                    # O dicionário já é o comando se tiver a chave 'action' na raiz
+                    if "action" in command_data:
+                        command = command_data
                     
+                    # CENÁRIO 2: Formato Celery (via app.send_task)
+                    # O comando está dentro de uma lista na chave 'args'
+                    elif "args" in command_data:
+                        args = command_data.get("args", [])
+                        if args and isinstance(args, list) and len(args) > 0:
+                            command = args[0]
+
                 elif isinstance(command_data, list):
-                    # Formato 2 (Ex: 'publish' vindo de args diretos)
+                    # CENÁRIO 3: Formato Lista Legado
                     # Espera: [[{'action': 'publish', ...}], {}, {...}]
                     if len(command_data) > 0 and isinstance(command_data[0], list) and len(command_data[0]) > 0:
-                        command = command_data[0][0] # Pega o primeiro comando da primeira lista
+                        command = command_data[0][0] 
                 
                 # Validação final
                 if not command or not isinstance(command, dict):
                     raise ValueError(f"Não foi possível extrair um dicionário de comando válido. Dados recebidos: {command_data}")
-                # --- FIM DA LÓGICA DE EXTRAÇÃO ---
 
                 
                 # Todo o código agora usa a variável 'command'

@@ -1,5 +1,5 @@
 # permission_service/requirements.txt
 celery
 requests
-amqp
+pika
 watchdog

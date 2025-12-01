@@ -18,7 +18,7 @@ MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "emqx")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 
 # DB Service
-DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db-service:8002/api")
+DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://servico-banco-dados:8002/api")
 
 # Bridge Service
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", 300)) # 5 minutos

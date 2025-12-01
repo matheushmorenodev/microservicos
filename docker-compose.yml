@@ -1,6 +1,6 @@
 services:
   # ======================================================================================
-  #                             Serviços de Infraestrutura
+  #                                Serviços de Infraestrutura
   # ======================================================================================
   postgres_db:
     image: postgres:13-alpine
@@ -12,7 +12,7 @@ services:
       - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=main_db
     ports:
-      - "5432:5432" # Mantido para depuração local
+      - "5432:5432"
     networks:
       - app-network
     healthcheck:
@@ -25,8 +25,8 @@ services:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"  # Porta para os workers Celery
-      - "15672:15672" # Interface de gerenciamento
+      - "5672:5672"
+      - "15672:15672"
     networks:
       - app-network
     volumes:
@@ -41,10 +41,8 @@ services:
     image: emqx/emqx:5.8
     container_name: emqx
     ports:
-      - "1883:1883"    # Porta padrão MQTT
-      - "18083:18083"  # Dashboard/API HTTP
-      # - "8083:8083"    # WebSocket (opcional)
-      # - "8883:8883"    # MQTT SSL (opcional)
+      - "1883:1883"
+      - "18083:18083"
     environment:
       - "EMQX_NAME=emqx-node1"
       - "EMQX_HOST=emqx"
@@ -57,15 +55,15 @@ services:
       - app-network
 
   # ======================================================================================
-  #                            Serviços de API (Interface)
+  #                                Serviços de API (Interface)
   # ======================================================================================
-  auth-service:
-    build: ./api_autenticacao
-    container_name: auth-service
+  servico-autenticacao:
+    build: ./servico-autenticacao
+    container_name: servico-autenticacao
     command: python manage.py runserver 0.0.0.0:8001
     env_file: .env
     volumes:
-      - ./api_autenticacao:/app
+      - ./servico-autenticacao:/app
     ports:
       - "8001:8001"
     networks:
@@ -79,27 +77,27 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DB_SERVICE_URL=http://db-service:8002/
+      - DB_SERVICE_URL=http://servico-banco-dados:8002/
     volumes:
       - ./middleware:/app
     depends_on:
       rabbitmq:
         condition: service_healthy
-      permission-service:
+      servico-permissao:
         condition: service_started
     networks:
       - app-network
 
   # ======================================================================================
-  #                            Serviços de Lógica (Workers)
+  #                               Serviços de Lógica (Workers)
   # ======================================================================================
-  db-service:
-    build: ./servico_banco_dados
-    container_name: db-service
+  servico-banco-dados:
+    build: ./servico-banco-dados
+    container_name: servico-banco-dados
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8002"
     env_file: .env
     volumes:
-      - ./servico_banco_dados:/app
+      - ./servico-banco-dados:/app
     ports:
       - "8002:8002"
     environment:
@@ -121,72 +119,48 @@ services:
       retries: 10
       start_period: 90s
 
-  permission-service:
-    build: ./permission_service
-    container_name: permission-service
-    command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q permission_queue
+  servico-permissao:
+    build: ./servico-permissao
+    container_name: servico-permissao
+    command: celery -A tasks worker --loglevel=info -Q permission_queue
     env_file: .env
     volumes:
-      - ./permission_service:/app
+      - ./servico-permissao:/app
     restart: on-failure
     depends_on:
-      db-service:
+      servico-banco-dados:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
       - app-network
 
-  log-service:
-    build: ./log_service
-    container_name: log-service
-    command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q log_queue
+  servico-log:
+    build: ./servico-log
+    container_name: servico-log
+    command: celery -A tasks worker --loglevel=info -Q log_queue
     env_file: .env
     volumes:
-      - ./log_service:/app
+      - ./servico-log:/app
     restart: on-failure
     depends_on:
       rabbitmq:
         condition: service_healthy
-      db-service:
+      servico-banco-dados:
         condition: service_healthy
     networks:
       - app-network
 
-  # door-service:
-  #   build: ./door_service
-  #   container_name: door-service
-  #   command: watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- celery -A tasks worker --loglevel=info -Q door_commands
-  #   restart: on-failure
-  #   env_file: .env
-  #   volumes:
-  #     - ./door_service:/app
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #     emqx:
-  #       condition: service_started
-  #     db-service:
-  #       condition: service_healthy
-  #   networks:
-  #     - app-network
-
-  door_bridge_service:
-    # Constrói a imagem a partir do Dockerfile no diretório atual
-    build: ./door_service_teste
-    # Ou, se você já construiu manualmente:
-    # image: door-bridge-service:latest
-    container_name: door_bridge_service
+  servico-porta:
+    build: ./servico-porta
+    container_name: servico-porta
     restart: unless-stopped
-    # Define as variáveis de ambiente que o 'config.py' irá ler
     environment:
       - RABBITMQ_HOST=rabbitmq
       - MQTT_BROKER_HOST=emqx
-      - DB_SERVICE_URL=http://db-service:8002/api
-      # Descomente se suas credenciais do RabbitMQ não forem 'guest:guest'
-      # - RABBITMQ_USER=user
-      # - RABBITMQ_PASS=pass
-    # Conecta o serviço à rede da aplicação
+      - DB_SERVICE_URL=http://servico-banco-dados:8002/api
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASS=guest
     networks:
       - app-network
     depends_on:
@@ -194,10 +168,11 @@ services:
         condition: service_healthy
       emqx:
         condition: service_started
-      db-service:
+      servico-banco-dados:
         condition: service_healthy
+
 # ======================================================================================
-#                                Redes e Volumes
+#                                   Redes e Volumes
 # ======================================================================================
 networks:
   app-network:
