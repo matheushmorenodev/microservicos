@@ -1,3 +1,4 @@
+# servico-banco-dados/core/filters.py
 from django_filters import rest_framework as filters
 from .models import UserPermissionRoom
 

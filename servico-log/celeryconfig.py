@@ -1,3 +1,4 @@
+# servico-log/celeryconfig.py
 # URL de conexão com o RabbitMQ
 broker_url = 'amqp://guest:guest@rabbitmq:5672//'
 

@@ -1,4 +1,4 @@
-# Framework principal
+# servico-banco-dados/requirements.txt
 Django==4.2
 
 # Para criar APIs REST

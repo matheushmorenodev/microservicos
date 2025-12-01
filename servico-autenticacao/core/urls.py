@@ -1,4 +1,4 @@
-# core/urls.py
+# servico-autenticacao/core/urls.py
 from django.urls import path
 from .views import LoginAPIView, ProfileAPIView, CustomTokenRefreshView
 from rest_framework_simplejwt.views import TokenVerifyView

@@ -1,4 +1,4 @@
-# core/authentication.py
+# servico-autenticacao/core/authentication.py
 from dataclasses import dataclass
 from rest_framework_simplejwt.authentication import JWTAuthentication
 

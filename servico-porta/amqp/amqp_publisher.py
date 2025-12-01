@@ -1,4 +1,4 @@
-# door_service_teste/amqp/amqp_publisher.py
+# servico-porta/amqp/amqp_publisher.py
 import json
 import logging
 import aio_pika

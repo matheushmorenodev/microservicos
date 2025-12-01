@@ -1,3 +1,4 @@
+# servico-autenticacao/suap_auth/asgi.py
 """
 ASGI config for api_autenticacao project.
 

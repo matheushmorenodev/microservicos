@@ -1,4 +1,4 @@
-# door_service_teste/bridge_service.py
+# servico-porta/bridge_service.py
 import os
 import logging
 import asyncio

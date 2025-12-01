@@ -1,4 +1,4 @@
-# door_service_teste/config.py
+# servico-porta/config.py
 import os
 
 # RabbitMQ / AMQP

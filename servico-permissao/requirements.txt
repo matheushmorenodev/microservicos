@@ -1,4 +1,4 @@
-# permission_service/requirements.txt
+#servico-permissao/requirements.txt
 celery
 requests
 pika

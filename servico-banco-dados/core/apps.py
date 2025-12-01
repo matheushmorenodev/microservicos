@@ -1,4 +1,4 @@
-# core/apps.py
+# servico-banco-dados/core/apps.py
 from django.apps import AppConfig
 import sys
 

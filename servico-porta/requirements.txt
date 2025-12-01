@@ -1,4 +1,4 @@
-# requirements.txt
+# servico-porta/requirements.txt
 aio-pika
 aiohttp
 watchdog

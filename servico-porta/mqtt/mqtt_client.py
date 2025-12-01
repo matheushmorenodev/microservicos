@@ -1,4 +1,4 @@
-# door_service_teste/mqtt/mqtt_client.py
+# servico-porta/mqtt/mqtt_client.py
 
 import logging
 import asyncio

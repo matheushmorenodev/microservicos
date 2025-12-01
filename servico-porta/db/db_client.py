@@ -1,4 +1,4 @@
-# door_service_teste/db/db_client.py
+# servico-porta/db/db_client.py
 import logging
 from typing import Set
 

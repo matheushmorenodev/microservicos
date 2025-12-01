@@ -1,3 +1,4 @@
+# servico-autenticacao/suap_auth/settings.py
 from pathlib import Path
 from datetime import timedelta
 import os

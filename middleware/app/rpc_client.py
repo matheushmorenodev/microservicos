@@ -1,5 +1,4 @@
 # middleware/app/rpc_client.py
-
 import json
 import asyncio
 import logging

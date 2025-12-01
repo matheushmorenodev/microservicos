@@ -1,4 +1,4 @@
-# core/serializers.py
+# servico-autenticacao/core/serializers.py
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from .services import SUAPService

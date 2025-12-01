@@ -1,3 +1,4 @@
+# servico-banco-dados/core/serializers.py
 from rest_framework import serializers
 from .models import ActorUser, Department, Room, UserPermissionRoom, IOT, LogEntry
 

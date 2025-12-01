@@ -1,3 +1,4 @@
+#servico-permissao/celeryconfig.py
 import os
 
 # Configurações do RabbitMQ

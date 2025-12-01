@@ -1,3 +1,4 @@
+# servico-banco-dados/core/admin.py
 from django.contrib import admin
 from .models import ActorUser, Department, Room, IOT, UserPermissionRoom, LogEntry
 
