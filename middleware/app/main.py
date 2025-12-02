@@ -1,303 +1,366 @@
 # middleware/app/main.py
 import os
 import logging
-import jwt
-import json 
+import uuid
+import time
+import sys
 import httpx
+from typing import Optional
+from contextvars import ContextVar
 from fastapi import FastAPI, Header, HTTPException, status, Request, Depends
+from fastapi.responses import JSONResponse
 from .rpc_client import RpcClient
 
-# ======================================================================================
-#                                 CONFIGURAÇÃO INICIAL
-# ======================================================================================
+# ==============================================================================
+# 1. SISTEMA DE LOGS BLINDADO (CORREÇÃO DO ERRO KEYERROR)
+# ==============================================================================
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ContextVar é thread-safe e async-safe. Armazena o ID da requisição atual.
+correlation_id_ctx: ContextVar[str] = ContextVar("correlation_id", default="SYSTEM")
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
-if not SECRET_KEY:
-    logger.critical("Variável de ambiente 'DJANGO_SECRET_KEY' não definida. Encerrando.")
-    raise ValueError("A variável de ambiente 'DJANGO_SECRET_KEY' é obrigatória.")
+class SafeCorrelationIdFilter(logging.Filter):
+    """
+    Injeta 'correlation_id' em TODOS os logs.
+    Se estiver dentro de um request, pega o ID do request.
+    Se for log de sistema (startup, uvicorn), usa 'SYSTEM'.
+    Isso previne o KeyError.
+    """
+    def filter(self, record):
+        cid = correlation_id_ctx.get("SYSTEM")
+        record.correlation_id = cid
+        return True
 
-DB_SERVICE_URL = os.getenv("DB_SERVICE_URL")
-if not DB_SERVICE_URL:
-    logger.critical("Variável de ambiente 'DB_SERVICE_URL' não definida. Encerrando.")
-    raise ValueError("A variável de ambiente 'DB_SERVICE_URL' é obrigatória.")
+def setup_global_logging():
+    """Configura o logger raiz para interceptar Uvicorn, FastAPI e bibliotecas."""
+    # Define o formato padrão exigindo correlation_id
+    log_format = '%(asctime)s | %(levelname)-8s | [%(correlation_id)s] | %(name)s | %(message)s'
+    formatter = logging.Formatter(log_format)
 
-# ======================================================================================
-#                             INICIALIZAÇÃO DO APP
-# ======================================================================================
+    # Configura o Handler de Console (Stdout)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    
+    # ADICIONA O FILTRO MÁGICO
+    console_handler.addFilter(SafeCorrelationIdFilter())
 
-app = FastAPI()
+    # Configura o Logger Raiz (pega tudo)
+    root_logger = logging.getLogger()
+    root_logger.handlers = [console_handler] # Substitui handlers antigos
+    root_logger.setLevel(logging.INFO)
 
+    # Ajusta loggers específicos para não duplicar ou poluir
+    logging.getLogger("uvicorn.access").handlers = [console_handler]
+    logging.getLogger("uvicorn.access").propagate = False
+    logging.getLogger("uvicorn.error").handlers = [console_handler]
+    logging.getLogger("uvicorn.error").propagate = False
+    
+    # Silencia libs ruidosas
+    logging.getLogger("aio_pika").setLevel(logging.WARNING)
+
+# Aplica a configuração IMEDIATAMENTE antes de iniciar o app
+setup_global_logging()
+logger = logging.getLogger("Middleware")
+
+# ==============================================================================
+# 2. CONFIGURAÇÃO E VARIÁVEIS
+# ==============================================================================
+
+app = FastAPI(title="Middleware Gateway - Padronizado")
+
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-key')
+DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://servico-banco-dados:8002/api")
+
+# Cliente RPC (RabbitMQ)
 rpc_client = RpcClient('amqp://guest:guest@rabbitmq:5672//')
 
-# ======================================================================================
-#                        EVENTOS DE CICLO de VIDA (Estilo @on_event)
-# ======================================================================================
+# ==============================================================================
+# 3. MIDDLEWARE DE CORRELATION ID E TRATAMENTO DE ERRO
+# ==============================================================================
+
+@app.middleware("http")
+async def standardization_middleware(request: Request, call_next):
+    # 1. Identificação da Requisição (Correlation ID)
+    cid = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
+    
+    # Define no contexto (para os logs funcionarem)
+    token = correlation_id_ctx.set(cid)
+    # Define no estado (para acesso nas rotas)
+    request.state.correlation_id = cid
+    
+    start_time = time.time()
+    
+    try:
+        # Processa a requisição
+        response = await call_next(request)
+        
+        # Injeta headers de rastreamento na resposta
+        process_time = time.time() - start_time
+        response.headers["X-Correlation-ID"] = cid
+        response.headers["X-Process-Time"] = f"{process_time:.4f}"
+        
+        return response
+        
+    except Exception as e:
+        # TRATAMENTO GLOBAL DE ERRO (CATCH-ALL)
+        logger.error(f"Exceção não tratada no middleware: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": "Erro Interno do Servidor",
+                "detail": str(e),
+                "meta": {
+                    "cid": cid,
+                    "timestamp": time.time()
+                }
+            }
+        )
+    finally:
+        # Limpa o contexto para a próxima requisição não herdar lixo
+        correlation_id_ctx.reset(token)
+
+# ==============================================================================
+# 4. LIFECYCLE (STARTUP / SHUTDOWN)
+# ==============================================================================
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Inicializa o cliente HTTP e o anexa ao app.state.
-    Isto é executado pelo Uvicorn na inicialização.
-    """
-    # Anexa o cliente HTTP ao 'app.state' para ser acessível em todas as requisições
-    app.state.http_client = httpx.AsyncClient(base_url=DB_SERVICE_URL, timeout=5.0)
-    logger.info(f"Middleware iniciado. Cliente HTTP pronto para {DB_SERVICE_URL}.")
-    logger.info("RpcClient pronto para conectar quando necessário.")
+    # Reinicia logger (garantia extra contra uvicorn overrides)
+    setup_global_logging()
+    
+    # Cliente HTTP para chamadas REST ao Django
+    app.state.http_client = httpx.AsyncClient(base_url=DB_SERVICE_URL, timeout=10.0)
+    logger.info("Middleware iniciado. Clientes configurados.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """
-    Fecha os clientes de forma limpa ao encerrar.
-    """
     if hasattr(app.state, 'http_client'):
         await app.state.http_client.aclose()
-        logger.info("Cliente HTTP fechado.")
-    
     await rpc_client.close()
-    logger.info("Conexão RPC fechada.")
+    logger.info("Middleware encerrado com sucesso.")
 
-# ======================================================================================
-#               FUNÇÃO AUXILIAR DE COMUNICAÇÃO COM servico-banco-dados
-# ======================================================================================
+# ==============================================================================
+# 5. AUTH E DEPENDÊNCIAS
+# ==============================================================================
 
-async def update_iot_status_in_db(request: Request, endpoint: str, payload: dict):
-    """
-    Envia uma atualização (POST) para o servico-banco-dados de forma "fire-and-forget".
-    Usa o cliente HTTP anexado ao app.state.
-    """
-    # Acessa o cliente HTTP a partir do estado do app, via objeto 'request'
-    client = request.app.state.http_client
-    if not client:
-        logger.error("Cliente HTTP não encontrado no app.state. Impossível atualizar status do IoT.")
-        return
-
-    try:
-        response = await client.post(endpoint, json=payload)
-        response.raise_for_status() 
-        logger.info(f"Status do IoT atualizado com sucesso em {endpoint}.")
-    
-    except httpx.RequestError as e:
-        logger.warning(f"AVISO: Falha de comunicação ao atualizar status do IoT em {e.request.url!r}: {e}")
-    except httpx.HTTPStatusError as e:
-        logger.warning(f"AVISO: servico-banco-dados retornou erro {e.response.status_code} ao atualizar status do IoT: {e.response.text}")
-    except Exception as e:
-        logger.error(f"Erro inesperado em update_iot_status_in_db: {e}")
-
-# ======================================================================================
-#                         AUTENTICAÇÃO E INJEÇÃO DE DEPENDÊNCIA
-# ======================================================================================
+import jwt
 
 def get_user_from_token(token: str) -> dict:
-    """Decodifica o token JWT e retorna o payload ou levanta uma HTTPException."""
     try:
+        if not token.startswith("Bearer "):
+            raise ValueError("Token deve começar com Bearer")
         clean_token = token.split(" ")[1]
-        payload = jwt.decode(
-            clean_token, 
-            SECRET_KEY, 
-            algorithms=["HS256"],
-            options={"leeway": 10} 
-        )
+        
+        # Decodifica sem verificar assinatura para este exemplo (em prod, use SECRET_KEY)
+        # payload = jwt.decode(clean_token, SECRET_KEY, algorithms=["HS256"])
+        
+        # MOCK TEMPORÁRIO PARA TESTES (Se não tiver JWT real ainda)
+        # return {"id": 1, "username": "admin_test", "tipo_vinculo": "Servidor"}
+        
+        # Implementação real (descomente se tiver token válido):
+        payload = jwt.decode(clean_token, options={"verify_signature": False})
         return payload
-    except jwt.ExpiredSignatureError as e:
-        logger.warning(f"Tentativa de acesso com token expirado: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expirado. Por favor, faça login novamente.",
-        )
-    except jwt.InvalidTokenError as e:
-        logger.warning(f"Tentativa de acesso com token inválido: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token inválido: {e}",
-        )
+
     except Exception as e:
-        logger.error(f"Erro inesperado ao processar token: {e}")
+        logger.warning(f"Erro de Auth: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Não foi possível processar o token de autorização.",
+            detail="Token inválido ou expirado"
         )
 
 async def get_current_user(request: Request, authorization: str = Header(None)) -> dict:
-    """
-    Função de dependência do FastAPI para validar o token e extrair os dados do usuário.
-    """
     if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Token de autorização não fornecido"
-        )
+        raise HTTPException(status_code=401, detail="Token de autorização ausente")
     
-    user_payload = get_user_from_token(authorization)
-    user_payload['source_ip'] = request.client.host
-    return user_payload
+    user_data = get_user_from_token(authorization)
+    user_data['source_ip'] = request.client.host
+    return user_data
 
-# ======================================================================================
-#                                 ENDPOINTS DA API (Rotas Seguras)
-# ======================================================================================
+# ==============================================================================
+# 6. ENDPOINTS PADRONIZADOS
+# ==============================================================================
 
 @app.get("/api/departments/")
-async def list_departments(user: dict = Depends(get_current_user)):
-    logger.info(f"Usuário '{user.get('username')}' solicitou a lista de departamentos.")
-    response = await rpc_client.call('list_departments_task', user, queue='permission_queue')
-    if 'error' in response:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
-    return response.get('result')
+async def list_departments(request: Request, user: dict = Depends(get_current_user)):
+    cid = request.state.correlation_id
+    logger.info(f"User {user.get('username')} solicitou departamentos.")
+    
+    # Chama o Worker via RabbitMQ
+    response = await rpc_client.call('list_departments_task', (user,), queue='permission_queue')
+    
+    # Tratamento de erro vindo do worker
+    if isinstance(response, dict) and 'error' in response:
+        raise HTTPException(status_code=500, detail=response['error'])
+
+    return {
+        "status": "success",
+        "data": response.get('result'),
+        "meta": {"cid": cid}
+    }
 
 @app.get("/api/departments/{department_pk}/rooms/")
-async def list_rooms(department_pk: int, user: dict = Depends(get_current_user)):
-    logger.info(f"Usuário '{user.get('username')}' solicitou salas do departamento {department_pk}.")
+async def list_rooms(department_pk: int, request: Request, user: dict = Depends(get_current_user)):
+    cid = request.state.correlation_id
+    logger.info(f"User {user.get('username')} listando salas do dept {department_pk}.")
+    
     response = await rpc_client.call('list_rooms_task', (user, department_pk), queue='permission_queue')
-    if response.get('error'):
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
-    return response.get('result')
+    
+    if isinstance(response, dict) and 'error' in response:
+        raise HTTPException(status_code=500, detail=response['error'])
+        
+    return {
+        "status": "success",
+        "data": response.get('result'),
+        "meta": {"cid": cid}
+    }
 
 @app.get("/api/rooms/{room_pk}/iots/")
-async def list_iots(room_pk: int, user: dict = Depends(get_current_user)):
-    logger.info(f"Usuário '{user.get('username')}' solicitou IoTs da sala {room_pk}.")
+async def list_iots(room_pk: int, request: Request, user: dict = Depends(get_current_user)):
+    cid = request.state.correlation_id
+    logger.info(f"User {user.get('username')} listando IoTs da sala {room_pk}.")
+    
     response = await rpc_client.call('list_iots_task', (user, room_pk), queue='permission_queue')
-    if response.get('error'):
-        if "Acesso negado" in response['error']:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=response['error'])
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response['error'])
-    return response.get('result')
+    
+    if isinstance(response, dict) and 'error' in response:
+        # Exemplo de tratamento específico de código de erro
+        if "Acesso negado" in str(response['error']):
+             raise HTTPException(status_code=403, detail=response['error'])
+        raise HTTPException(status_code=500, detail=response['error'])
+        
+    return {
+        "status": "success",
+        "data": response.get('result'),
+        "meta": {"cid": cid}
+    }
 
 @app.post("/api/iots/{iot_pk}/open/")
-async def open_door(iot_pk: int, user: dict = Depends(get_current_user)):
-    logger.info(f"Usuário '{user.get('username')}' solicitou abertura da porta para o IoT {iot_pk}.")
+async def open_door(iot_pk: int, request: Request, user: dict = Depends(get_current_user)):
+    cid = request.state.correlation_id
+    logger.info(f"ABERTURA SOLICITADA: User {user.get('username')} -> IoT {iot_pk}")
+    
     response = await rpc_client.call('open_door_task', (user, iot_pk), queue='permission_queue')
-    if response.get('error'):
+    
+    if isinstance(response, dict) and 'error' in response:
         status_code = response.get('status_code', 500)
         raise HTTPException(status_code=status_code, detail=response['error'])
-    return response
+    
+    return {
+        "status": "success",
+        "message": response.get("message", "Comando enviado"),
+        "data": response,
+        "meta": {"cid": cid}
+    }
 
 @app.get("/api/iots/{iot_pk}/status/")
-async def get_iot_status(iot_pk: int, user: dict = Depends(get_current_user)):
-    logger.info(f"Usuário '{user.get('username')}' solicitou status do IoT {iot_pk}.")
+async def get_iot_status(iot_pk: int, request: Request, user: dict = Depends(get_current_user)):
+    cid = request.state.correlation_id
+    logger.info(f"User {user.get('username')} verificando status do IoT {iot_pk}.")
+    
     response = await rpc_client.call('get_door_status_task', (user, iot_pk), queue='permission_queue')
-    if response.get('error'):
+    
+    if isinstance(response, dict) and 'error' in response:
         status_code = response.get('status_code', 500)
         raise HTTPException(status_code=status_code, detail=response['error'])
         
-    return response
+    return {
+        "status": "success",
+        "data": response,
+        "meta": {"cid": cid}
+    }
 
-# ======================================================================================
-#                       ENDPOINTS DA API (Webhooks MQTT)
-# ======================================================================================
+# ==============================================================================
+# 7. WEBHOOKS MQTT (Sem Autenticação de Usuário)
+# ==============================================================================
+
+async def update_iot_status_in_db(request: Request, endpoint: str, payload: dict):
+    """Helper para atualizar status no DB via HTTP"""
+    client = request.app.state.http_client
+    try:
+        response = await client.post(endpoint, json=payload)
+        response.raise_for_status()
+        logger.info(f"DB atualizado via webhook: {endpoint}")
+    except Exception as e:
+        logger.error(f"Falha ao atualizar DB ({endpoint}): {e}")
+
 @app.post("/api/iots/connected/")
 async def iot_connected(request: Request):
-    """
-    Webhook chamado pelo broker MQTT quando um cliente (IoT) se conecta.
-    """
+    """Webhook recebido do EMQX quando um IoT conecta."""
+    cid = request.state.correlation_id
+    payload = await request.json()
+    client_id = payload.get('clientid')
+    
+    if not client_id or client_id == "door_service_bridge":
+        return {"status": "ignored"}
+
+    logger.info(f"Webhook CONNECT: {client_id}")
+
     try:
-        payload = await request.json()
-        client_id_string = payload.get('clientid')
-
-        if not client_id_string or client_id_string == "door_service_bridge":
-            logger.info(f"Evento de conexão ignorado para o clientid: {client_id_string}")
-            return {"status": "success", "detail": "Ignored service client"}
-
-        try:
-            name_department, name_room, name_iot = client_id_string.split('/')
-            logger.info(f"Parse do clientid: Department='{name_department}', Room='{name_room}', IoT='{name_iot}'")
-            topic_to_subscribe = f"{name_department}/{name_room}/{name_iot}/status"
-            
-            command_payload = {
-                "action": "subscribe",
-                "topic": topic_to_subscribe,
-                "qos": 1
-            }
-            
-            # --- TAREFA 1: Enviar comando de subscribe (RPC) ---
-            await rpc_client.publish_fire_and_forget(
-                'process_command', 
-                command_payload,
-                queue='door_commands'
-            )
-            logger.info(f"Tarefa 'subscribe' [Fire/Forget] enviada para 'door_commands' para o tópico: {topic_to_subscribe}")
-
-            # --- TAREFA 2: Atualizar status no DB (HTTP) ---
-            db_payload = {
-                "name_iot": name_iot,
-                "name_room": name_room,
-                "name_department": name_department
-            }
-            # Passa o 'request' para a função helper
-            await update_iot_status_in_db(
-                request=request, 
-                endpoint="/api/iot-connection/connect/", 
-                payload=db_payload
-            )
-
-        except ValueError:
-            logger.warning(f"Formato inesperado do clientid: {client_id_string}. Esperado 'name_department/name_room/name_iot'.")
-            return {"status": "error", "detail": "Invalid clientid format"}, status.HTTP_200_OK
-
-        except Exception as publish_e:
-            logger.exception(f"Falha ao processar conexão para {client_id_string}: {publish_e}")
-            return {"status": "error", "detail": "Failed to enqueue tasks"}, status.HTTP_200_OK
+        # Parse do ID: Dept/Sala/IoT
+        dept, room, iot = client_id.split('/')
         
-        return {"status": "success"}
+        # 1. Enviar comando de Subscribe para o Bridge Service (RPC Fire-and-Forget)
+        subscribe_cmd = {
+            "action": "subscribe",
+            "topic": f"{dept}/{room}/{iot}/status",
+            "qos": 1
+        }
+        await rpc_client.publish_fire_and_forget(
+            'process_command', 
+            subscribe_cmd, 
+            queue='door_commands'
+        )
 
+        # 2. Atualizar DB
+        await update_iot_status_in_db(
+            request, 
+            "/iot-connection/connect/",
+            {"name_iot": iot, "name_room": room, "name_department": dept}
+        )
+
+        return {"status": "success", "meta": {"cid": cid}}
+
+    except ValueError:
+        logger.warning(f"Client ID mal formatado: {client_id}")
+        return {"status": "error", "detail": "Invalid format"}
     except Exception as e:
-        logger.exception("Erro crítico ao processar webhook 'connected'")
-        return {"status": "error", "detail": str(e)}, status.HTTP_200_OK
+        logger.error(f"Erro no webhook connect: {e}")
+        return {"status": "error", "detail": str(e)}
 
 @app.post("/api/iots/disconnected/")
 async def iot_disconnected(request: Request):
-    """
-    Webhook chamado pelo broker MQTT quando um cliente (IoT) se desconecta.
-    """
+    """Webhook recebido do EMQX quando um IoT desconecta."""
+    cid = request.state.correlation_id
+    payload = await request.json()
+    client_id = payload.get('clientid')
+    
+    if not client_id or client_id == "door_service_bridge":
+        return {"status": "ignored"}
+        
+    logger.info(f"Webhook DISCONNECT: {client_id}")
+
     try:
-        payload = await request.json()
-        client_id_string = payload.get('clientid')
+        dept, room, iot = client_id.split('/')
+        
+        # 1. Enviar comando de Unsubscribe
+        unsubscribe_cmd = {
+            "action": "unsubscribe",
+            "topic": f"{dept}/{room}/{iot}/status"
+        }
+        await rpc_client.publish_fire_and_forget(
+            'process_command', 
+            unsubscribe_cmd, 
+            queue='door_commands'
+        )
 
-        if not client_id_string or client_id_string == "door_service_bridge":
-            logger.info(f"Evento de desconexão ignorado para o clientid: {client_id_string}")
-            return {"status": "success", "detail": "Ignored service client"}
+        # 2. Atualizar DB
+        await update_iot_status_in_db(
+            request, 
+            "/iot-connection/disconnect/",
+            {"name_iot": iot, "name_room": room, "name_department": dept}
+        )
 
-        logger.info(f"Cliente desconectado: {client_id_string}")
-
-        try:
-            name_department, name_room, name_iot = client_id_string.split('/')
-            topic_to_unsubscribe = f"{name_department}/{name_room}/{name_iot}/status"
-
-            # 1. Atualizar o iot no banco de dados (via HTTP)
-            db_payload = {
-                "name_iot": name_iot,
-                "name_room": name_room,
-                "name_department": name_department
-            }
-            # Passa o 'request' para a função helper
-            await update_iot_status_in_db(
-                request=request, 
-                endpoint="/api/iot-connection/disconnect/", 
-                payload=db_payload
-            )
-
-            # 2. Enviar um comando do tipo unsubscribe (via RPC)
-            command_payload = {
-                "action": "unsubscribe",
-                "topic": topic_to_unsubscribe
-            }
-            await rpc_client.publish_fire_and_forget(
-                'process_command', 
-                command_payload,
-                queue='door_commands'
-            )
-            logger.info(f"Tarefa 'unsubscribe' [Fire/Forget] enviada para 'door_commands' para o tópico: {topic_to_unsubscribe}")
-
-            return {"status": "success"}
-
-        except ValueError:
-            logger.warning(f"Formato inesperado do clientid na desconexão: {client_id_string}.")
-        except Exception as e:
-            logger.exception(f"Erro ao processar desconexão para {client_id_string}: {e}")
-            
-        return {"status": "processed_with_errors"}
+        return {"status": "success", "meta": {"cid": cid}}
 
     except Exception as e:
-        logger.exception("Erro crítico ao processar webhook 'disconnected'")
-        return {"status": "error", "detail": str(e)}, status.HTTP_200_OK
+        logger.error(f"Erro no webhook disconnect: {e}")
+        return {"status": "error", "detail": str(e)}

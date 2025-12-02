@@ -1,8 +1,6 @@
 # docker-compose.yml
 services:
-  # ======================================================================================
-  #                                Serviços de Infraestrutura
-  # ======================================================================================
+  # --- Infraestrutura ---
   postgres_db:
     image: postgres:13-alpine
     container_name: postgres_db
@@ -50,26 +48,10 @@ services:
       - "EMQX_ALLOW_ANONYMOUS=true"
     volumes:
       - emqx_data:/opt/emqx/data
-      - emqx_etc:/opt/emqx/etc
-      - emqx_log:/opt/emqx/log
     networks:
       - app-network
 
-  # ======================================================================================
-  #                                Serviços de API (Interface)
-  # ======================================================================================
-  servico-autenticacao:
-    build: ./servico-autenticacao
-    container_name: servico-autenticacao
-    command: python manage.py runserver 0.0.0.0:8001
-    env_file: .env
-    volumes:
-      - ./servico-autenticacao:/app
-    ports:
-      - "8001:8001"
-    networks:
-      - app-network
-
+  # --- APIs ---
   middleware:
     build: ./middleware
     container_name: middleware
@@ -78,30 +60,36 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DB_SERVICE_URL=http://servico-banco-dados:8002/
-    volumes:
-      - ./middleware:/app
+      - SERVICE_NAME=middleware
+      - LOG_LEVEL=INFO
+      - DB_SERVICE_URL=http://servico-banco-dados:8002/api
     depends_on:
       rabbitmq:
         condition: service_healthy
-      servico-permissao:
-        condition: service_started
     networks:
       - app-network
 
-  # ======================================================================================
-  #                               Serviços de Lógica (Workers)
-  # ======================================================================================
+  servico-autenticacao:
+    build: ./servico-autenticacao
+    container_name: servico-autenticacao
+    command: python manage.py runserver 0.0.0.0:8001
+    env_file: .env
+    environment:
+      - SERVICE_NAME=auth-service
+    ports:
+      - "8001:8001"
+    networks:
+      - app-network
+
   servico-banco-dados:
     build: ./servico-banco-dados
     container_name: servico-banco-dados
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8002"
     env_file: .env
-    volumes:
-      - ./servico-banco-dados:/app
     ports:
       - "8002:8002"
     environment:
+      - SERVICE_NAME=db-service
       - DB_NAME=main_db
       - DB_USER=myuser
       - DB_PASS=mypassword
@@ -113,24 +101,18 @@ services:
         condition: service_healthy
     networks:
       - app-network
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('localhost', 8002))\""]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 90s
 
+  # --- Workers ---
   servico-permissao:
     build: ./servico-permissao
     container_name: servico-permissao
     command: celery -A tasks worker --loglevel=info -Q permission_queue
     env_file: .env
-    volumes:
-      - ./servico-permissao:/app
-    restart: on-failure
+    environment:
+      - SERVICE_NAME=permission-worker
     depends_on:
       servico-banco-dados:
-        condition: service_healthy
+        condition: service_started
       rabbitmq:
         condition: service_healthy
     networks:
@@ -141,13 +123,10 @@ services:
     container_name: servico-log
     command: celery -A tasks worker --loglevel=info -Q log_queue
     env_file: .env
-    volumes:
-      - ./servico-log:/app
-    restart: on-failure
+    environment:
+      - SERVICE_NAME=log-worker
     depends_on:
       rabbitmq:
-        condition: service_healthy
-      servico-banco-dados:
         condition: service_healthy
     networks:
       - app-network
@@ -157,11 +136,10 @@ services:
     container_name: servico-porta
     restart: unless-stopped
     environment:
+      - SERVICE_NAME=door-service
       - RABBITMQ_HOST=rabbitmq
       - MQTT_BROKER_HOST=emqx
       - DB_SERVICE_URL=http://servico-banco-dados:8002/api
-      - RABBITMQ_USER=guest
-      - RABBITMQ_PASS=guest
     networks:
       - app-network
     depends_on:
@@ -169,12 +147,7 @@ services:
         condition: service_healthy
       emqx:
         condition: service_started
-      servico-banco-dados:
-        condition: service_healthy
 
-# ======================================================================================
-#                                   Redes e Volumes
-# ======================================================================================
 networks:
   app-network:
     driver: bridge
@@ -182,6 +155,4 @@ networks:
 volumes:
   postgres_data:
   emqx_data:
-  emqx_etc:
-  emqx_log:
   rabbitmq_data:
