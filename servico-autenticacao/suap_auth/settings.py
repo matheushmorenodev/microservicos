@@ -19,7 +19,8 @@ SUAP_USER_DATA_URL = f'{SUAP_BASE_URL}/rh/meus-dados/'
 
 
 DEBUG = True
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
+CSRF_TRUSTED_ORIGINS = ['http://localhost:8000']
 
 # Aplicativos essenciais apenas para API
 INSTALLED_APPS = [

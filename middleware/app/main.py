@@ -149,25 +149,35 @@ def get_user_from_token(token: str) -> dict:
     try:
         if not token.startswith("Bearer "):
             raise ValueError("Token deve começar com Bearer")
+        
         clean_token = token.split(" ")[1]
         
-        # Decodifica sem verificar assinatura para este exemplo (em prod, use SECRET_KEY)
-        # payload = jwt.decode(clean_token, SECRET_KEY, algorithms=["HS256"])
+        # --- CORREÇÃO APLICADA ---
+        # Decodifica verificando a assinatura (HS256) usando a SECRET_KEY compartilhada.
+        # Se a chave for diferente ou o token for falso, lança erro.
+        payload = jwt.decode(clean_token, SECRET_KEY, algorithms=["HS256"])
         
-        # MOCK TEMPORÁRIO PARA TESTES (Se não tiver JWT real ainda)
-        # return {"id": 1, "username": "admin_test", "tipo_vinculo": "Servidor"}
-        
-        # Implementação real (descomente se tiver token válido):
-        payload = jwt.decode(clean_token, options={"verify_signature": False})
         return payload
 
-    except Exception as e:
-        logger.warning(f"Erro de Auth: {e}")
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expirado.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido ou expirado"
+            detail="Token expirado. Faça login novamente."
         )
-
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Token inválido: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido."
+        )
+    except Exception as e:
+        logger.warning(f"Erro inesperado de Auth: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Erro na validação da credencial."
+        )
+        
 async def get_current_user(request: Request, authorization: str = Header(None)) -> dict:
     if not authorization:
         raise HTTPException(status_code=401, detail="Token de autorização ausente")
