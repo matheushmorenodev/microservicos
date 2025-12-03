@@ -34,18 +34,22 @@ class ContextLogger:
 
     def _log(self, level, msg):
         full_msg = f"[{self.cid}] [User: {self.user}] {msg}"
+        
+        # Log local (stdout/arquivo)
         if level == 'info': self.local_logger.info(full_msg)
         elif level == 'error': self.local_logger.error(full_msg)
         elif level == 'warning': self.local_logger.warning(full_msg)
 
+        # Log via Celery (Assíncrono)
         try:
             app.send_task(
                 'save_log_task',
                 args=[self.service, level.upper(), full_msg, self.cid],
                 queue='log_queue'
             )
-        except Exception:
-            pass
+        except Exception as e:
+            # Falha silenciosa no envio do log para não parar o fluxo principal
+            self.local_logger.error(f"Falha ao enviar log para fila: {e}")
 
     def info(self, msg): self._log('info', msg)
     def error(self, msg): self._log('error', msg)
@@ -62,6 +66,7 @@ class StandardTask(Task):
 
         user_id = "SYSTEM"
         if args and isinstance(args[0], dict):
+            # Tenta extrair identificador do usuário de várias chaves comuns
             user_id = args[0].get('username') or args[0].get('matricula') or args[0].get('id') or "UNKNOWN"
         
         self.logger = ContextLogger("ServicoPermissao", cid, user_id)
@@ -71,48 +76,54 @@ class StandardTask(Task):
         return super().__call__(*args, **kwargs)
 
 # ==============================================================================
-# 3. HELPER RPC
+# 3. HELPER RPC (CORRIGIDO E SEGURO)
 # ==============================================================================
 def rpc_call_bridge(payload, correlation_id):
-    credentials = pika.PlainCredentials(RABBIT_USER, RABBIT_PASS)
-    parameters = pika.ConnectionParameters(host=RABBIT_HOST, port=RABBIT_PORT, credentials=credentials)
-    connection = pika.BlockingConnection(parameters)
-    channel = connection.channel()
+    connection = None
+    try:
+        credentials = pika.PlainCredentials(RABBIT_USER, RABBIT_PASS)
+        parameters = pika.ConnectionParameters(host=RABBIT_HOST, port=RABBIT_PORT, credentials=credentials)
+        connection = pika.BlockingConnection(parameters)
+        channel = connection.channel()
 
-    result = channel.queue_declare(queue='', exclusive=True)
-    callback_queue = result.method.queue
-    response = None
+        result = channel.queue_declare(queue='', exclusive=True)
+        callback_queue = result.method.queue
+        response = None
 
-    def on_response(ch, method, props, body):
-        nonlocal response
-        if props.correlation_id == correlation_id:
-            response = json.loads(body)
+        def on_response(ch, method, props, body):
+            nonlocal response
+            if props.correlation_id == correlation_id:
+                response = json.loads(body)
 
-    channel.basic_consume(queue=callback_queue, on_message_callback=on_response, auto_ack=True)
+        channel.basic_consume(queue=callback_queue, on_message_callback=on_response, auto_ack=True)
 
-    channel.basic_publish(
-        exchange='',
-        routing_key='door_commands',
-        properties=pika.BasicProperties(
-            reply_to=callback_queue,
-            correlation_id=correlation_id,
-            content_type='application/json'
-        ),
-        body=json.dumps(payload)
-    )
+        channel.basic_publish(
+            exchange='',
+            routing_key='door_commands',
+            properties=pika.BasicProperties(
+                reply_to=callback_queue,
+                correlation_id=correlation_id,
+                content_type='application/json'
+            ),
+            body=json.dumps(payload)
+        )
 
-    start_time = time.time()
-    while response is None:
-        connection.process_data_events()
-        if time.time() - start_time > 5:
+        start_time = time.time()
+        while response is None:
+            # time_limit evita uso de 100% de CPU enquanto espera
+            connection.process_data_events(time_limit=1) 
+            if time.time() - start_time > 5:
+                raise TimeoutError("Bridge Service não respondeu.")
+
+        return response
+
+    finally:
+        # Garante o fechamento da conexão mesmo se der erro no while ou Timeout
+        if connection and not connection.is_closed:
             connection.close()
-            raise TimeoutError("Bridge Service não respondeu.")
-
-    connection.close()
-    return response
 
 # ==============================================================================
-# 4. TAREFAS DE NEGÓCIO (COM LOGS ENRIQUECIDOS)
+# 4. TAREFAS DE NEGÓCIO
 # ==============================================================================
 
 @app.task(base=StandardTask, bind=True, name='list_departments_task')
@@ -136,17 +147,14 @@ def list_departments_task(self, user_data):
 
 @app.task(base=StandardTask, bind=True, name='list_rooms_task')
 def list_rooms_task(self, user_data, department_pk):
-    # 1. Busca prévia do nome do Departamento para o log
     headers = {'X-Correlation-ID': self.cid}
     dept_name = "Desconhecido"
     try:
-        # Consulta rápida ao detalhe do departamento
         dept_info = requests.get(f"{DB_SERVICE_URL}/departments/{department_pk}/", headers=headers, timeout=3).json()
         dept_name = dept_info.get('name', 'Desconhecido')
     except:
-        pass # Se falhar, loga como desconhecido mas continua o fluxo
+        pass
 
-    # LOG RICO COMO SOLICITADO
     self.logger.info(f"Buscando salas do Departamento '{dept_name}' #ID {department_pk}.")
 
     try:
@@ -166,7 +174,6 @@ def list_rooms_task(self, user_data, department_pk):
 
 @app.task(base=StandardTask, bind=True, name='list_iots_task')
 def list_iots_task(self, user_data, room_pk):
-    # 1. Busca prévia do nome da Sala para o log
     headers = {'X-Correlation-ID': self.cid}
     room_name = "Desconhecida"
     try:
@@ -175,7 +182,6 @@ def list_iots_task(self, user_data, room_pk):
     except:
         pass
 
-    # LOG RICO COMO SOLICITADO
     self.logger.info(f"Buscando IoTs da Sala '{room_name}' #ID {room_pk}.")
 
     try:
@@ -196,7 +202,6 @@ def list_iots_task(self, user_data, room_pk):
 
 @app.task(base=StandardTask, bind=True, name='open_door_task')
 def open_door_task(self, user_data, iot_pk):
-    # O Log inicial já será feito de forma rica após buscar os dados abaixo
     try:
         headers = {'X-Correlation-ID': self.cid}
         
@@ -209,7 +214,6 @@ def open_door_task(self, user_data, iot_pk):
         room_name = iot_data['room']['name']
         dept_name = iot_data['room']['department']['name']
         
-        # LOG INICIAL RICO (Movido para cá para ter os nomes)
         self.logger.info(f"Solicitando abertura da Porta '{iot_name}' na Sala '{room_name}' ({dept_name}).")
         
         command_topic = f"{dept_name}/{room_name}/{iot_name}/comando"
@@ -258,10 +262,6 @@ def get_door_status_task(self, user_data, iot_pk):
             room = iot_data['room']['name']
             iot = iot_data['name']
             status_topic = f"{dept}/{room}/{iot}/status"
-            
-            # LOG RICO
-            self.logger.info(f"Consultando sensor em tempo real: Porta '{iot}' em '{room}' ({dept}).")
-            
         except KeyError:
             return {"status": "error", "message": "Dados do IoT incompletos"}
 
@@ -274,8 +274,8 @@ def get_door_status_task(self, user_data, iot_pk):
         }
 
         try:
+            # A chamada RPC agora gerencia a conexão de forma segura
             sensor_data = rpc_call_bridge(payload_bridge, self.cid)
-            self.logger.info(f"Sensor '{iot}' respondeu: {sensor_data}")
             
             return {
                 "status": "success",

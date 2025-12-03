@@ -1,6 +1,9 @@
 # servico-log/dockerfile
 FROM python:3.11-slim
 
+RUN apt-get update && apt-get install -y tzdata
+ENV TZ=America/Sao_Paulo
+
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 

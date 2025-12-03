@@ -20,7 +20,11 @@ SUAP_USER_DATA_URL = f'{SUAP_BASE_URL}/rh/meus-dados/'
 
 DEBUG = True
 ALLOWED_HOSTS = ['*']
-CSRF_TRUSTED_ORIGINS = ['http://localhost:8000']
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://192.168.1.7:8000', # Seu IP atual
+]
 
 # Aplicativos essenciais apenas para API
 INSTALLED_APPS = [
@@ -57,10 +61,10 @@ DATABASES = {}
 AUTH_PASSWORD_VALIDATORS = []
 
 # Internacionalização (opcional)
-LANGUAGE_CODE = 'pt-br'
-TIME_ZONE = 'UTC'
-USE_I18N = False
-USE_TZ = False
+LANGUAGE_CODE = "pt-br"
+TIME_ZONE = "America/Sao_Paulo"
+USE_I18N = True
+USE_TZ = True
 
 # Sem arquivos estáticos
 STATIC_URL = None

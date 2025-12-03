@@ -58,33 +58,36 @@ class RoomViewSet(viewsets.ModelViewSet):
 class IOTViewSet(viewsets.ModelViewSet):
     serializer_class = IOTSerializer
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['name', 'status']
+    filterset_fields = ['name', 'status', 'room'] 
+
     def get_queryset(self):
-        """
-        Este método é chamado para obter a lista de itens.
-        Vamos modificá-lo para filtrar baseado nos parâmetros da URL.
-        """
-        # Começa com todos os objetos
-        queryset = IOT.objects.all() 
+        queryset = IOT.objects.all()
         
-        # Pega os parâmetros da URL (ex: /api/seu-endpoint/?name=...)
+        # Pega os parâmetros
+        room_pk = self.request.query_params.get('room_pk')
+        user_id = self.request.query_params.get('user_id')
         name = self.request.query_params.get('name', None)
         status = self.request.query_params.get('status', None)
+        
+        # --- AQUI ESTÁ A LÓGICA DO ROOM_PK ---
+        if room_pk is not None:
+            # Filtra onde o campo 'room' é igual ao ID passado
+            queryset = queryset.filter(room=room_pk)
+        # -------------------------------------
 
-        # Se o parâmetro 'name' foi enviado na URL, filtra o queryset
         if name is not None:
-            # 'name__icontains' faz uma busca "case-insensitive" (ignora maiúsculas/minúsculas)
-            # que contém o texto. Use 'name=name' se quiser correspondência exata.
             queryset = queryset.filter(name__icontains=name)
+        
+        if user_id is not None:
+            queryset = queryset.filter(room__userpermissionroom__user_id=user_id).distinct()
 
-        # Se o parâmetro 'status' foi enviado na URL, filtra o queryset
         if status is not None:
-            if status.lower() == 'true':
+            if str(status).lower() == 'true':
                 status = True
-            elif status.lower() == 'false':
+            elif str(status).lower() == 'false':
                 status = False
-            queryset = queryset.filter(status=status)
-
+            queryset = queryset.filter(status=status)        
+        
         return queryset
 
 class UserPermissionRoomViewSet(viewsets.ModelViewSet):

@@ -175,10 +175,10 @@ class BridgeService:
                 last_msg = self.mqtt_client.get_last_message(topic)
                 
                 if last_msg is None:
-                    await self._log("WARNING", f"Consulta status Porta '{iot}' (Sala {room}): Cache vazio/Sem dados.", cid, user)
+                    # await self._log("WARNING", f"Consulta status Porta '{iot}' (Sala {room}): Cache vazio/Sem dados.", cid, user)
                     return {"status": "nodata", "value": None}
                 
-                await self._log("INFO", f"Consulta status Porta '{iot}' (Sala {room}, Dept {dept}): Valor atual '{last_msg}'", cid, user)
+                # await self._log("INFO", f"Consulta status Porta '{iot}' (Sala {room}, Dept {dept}): Valor atual '{last_msg}'", cid, user)
                 
                 try:
                     return json.loads(last_msg)

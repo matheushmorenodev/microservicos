@@ -1,5 +1,7 @@
 # middleware/Dockerfile
 FROM python:3.10-slim
+RUN apt-get update && apt-get install -y tzdata
+ENV TZ=America/Sao_Paulo
 WORKDIR /app
 ENV PYTHONPATH /app
 ENV PYTHONUNBUFFERED 1
