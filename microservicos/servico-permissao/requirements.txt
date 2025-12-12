@@ -1,0 +1,5 @@
+#servico-permissao/requirements.txt
+celery
+requests
+pika
+watchdog

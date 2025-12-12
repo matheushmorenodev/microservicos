@@ -1,0 +1,5 @@
+# servico-log/requirements.txt
+celery
+requests
+amqp
+watchdog
