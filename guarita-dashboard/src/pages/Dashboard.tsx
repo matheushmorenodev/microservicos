@@ -18,7 +18,8 @@ interface Room {
 interface IOT {
   id: number;
   name: string;
-  status: boolean;
+  status: boolean;    // TRUE = Conectado ao Sistema | FALSE = Desconectado (Offline)
+  is_open?: boolean;  // TRUE = Porta Aberta | FALSE = Porta Fechada (Opcional por enquanto)
   room: Room;
 }
 
@@ -67,14 +68,16 @@ export function Dashboard() {
 
   async function fetchData() {
     try {
+      // Busca Departamentos
       const deptRes = await api.get('/departments/');
       const deptData = deptRes.data.data?.result || deptRes.data.data || [];
       setDepartments(Array.isArray(deptData) ? deptData : []);
 
+      // Busca IOTs
       const iotsRes = await api.get('/iots/');
       const payload = iotsRes.data; 
       
-      // Lógica robusta para encontrar o array de resultados
+      // Tratamento para garantir que é array
       if (payload.data && Array.isArray(payload.data.result)) {
           setIots(payload.data.result); 
       } else if (Array.isArray(payload.data)) {
@@ -91,7 +94,6 @@ export function Dashboard() {
     setLoadingResp(true);
     try {
       const res = await api.get(`/user-permissions/?room=${roomId}`);
-      // Adaptação caso venha paginado ou lista direta
       const data = res.data.results || res.data; 
       
       if (Array.isArray(data)) {
@@ -106,7 +108,7 @@ export function Dashboard() {
     }
   }
 
-  // Lógica de Filtragem (Busca + Departamento)
+  // Lógica de Filtragem
   const filteredIots = iots.filter(iot => {
     const searchString = searchTerm.toLowerCase();
     const iotName = iot.name ? iot.name.toLowerCase() : '';
@@ -124,7 +126,7 @@ export function Dashboard() {
       {/* --- HEADER --- */}
       <header className="bg-brand-green px-8 py-4 flex items-center justify-between shadow-md relative z-20">
         
-        {/* LOGO IFACCESS (Atualizado) */}
+        {/* LOGO IFACCESS */}
         <div className="flex items-center gap-3 select-none">
           <div className="relative w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
              {/* Arco Verde */}
@@ -179,7 +181,7 @@ export function Dashboard() {
             </div>
         </div>
 
-        {/* MENU OPÇÕES / SAIR */}
+        {/* MENU OPÇÕES */}
         <div className="relative">
             <button 
                 onClick={() => setMenuOpen(!menuOpen)}
@@ -200,7 +202,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      {/* --- CONTEÚDO PRINCIPAL (GRID) --- */}
+      {/* --- GRID DE PORTAS --- */}
       <main className="p-8 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredIots.length === 0 && (
@@ -220,13 +222,29 @@ export function Dashboard() {
                     </h3>
                     
                     <div className="self-end mt-auto">
-                        <span className={`px-3 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wide ${
-                            !iot.status 
-                            ? 'border-status-green text-status-green' 
-                            : 'border-status-red text-status-red'
-                        }`}>
-                            {!iot.status ? 'FECHADO' : 'ABERTO'}
-                        </span>
+                        {/* LÓGICA DE 3 ESTADOS */}
+                        {(() => {
+                            // 1. IOT Offline (Status no Banco = 0/False)
+                            if (!iot.status) {
+                                return (
+                                    <span className="px-3 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wide border-gray-300 text-gray-500 bg-gray-100">
+                                        DESCONECTADO
+                                    </span>
+                                );
+                            }
+
+                            // 2. IOT Online (Status = 1/True) -> Verifica se está Aberto ou Fechado
+                            const isOpen = iot.is_open || false;
+                            return (
+                                <span className={`px-3 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wide ${
+                                    isOpen 
+                                    ? 'border-red-200 text-red-600 bg-red-50'    // Aberto (Alerta)
+                                    : 'border-green-200 text-green-700 bg-green-50' // Fechado (Seguro)
+                                }`}>
+                                    {isOpen ? 'ABERTO' : 'FECHADO'}
+                                </span>
+                            );
+                        })()}
                     </div>
                 </div>
             ))}
@@ -238,10 +256,10 @@ export function Dashboard() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-[2px]">
             <div className="bg-white rounded-sm shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col relative animate-fade-in">
                 
-                {/* Header do Modal (Verde) */}
+                {/* Header do Modal */}
                 <div className="bg-brand-green p-6 flex items-center justify-between shadow-md">
                     
-                    {/* LOGO IFACCESS NO MODAL (Atualizado) */}
+                    {/* LOGO IFACCESS NO MODAL */}
                     <div className="flex items-center gap-3 select-none">
                         <div className="relative w-9 h-9 bg-white rounded-lg flex items-center justify-center shadow-sm">
                             <div className="w-3.5 h-4 border-l-[3px] border-t-[3px] border-[#1B5E20] rounded-tl-md mt-1 mr-0.5"></div>
@@ -271,9 +289,20 @@ export function Dashboard() {
 
                         <div>
                             <p className="text-xs font-bold text-gray-400 uppercase mb-1">Status:</p>
-                            <p className={`text-lg font-bold uppercase ${!selectedIoT.status ? 'text-status-green' : 'text-status-red'}`}>
-                                {!selectedIoT.status ? 'FECHADO' : 'ABERTO'}
-                            </p>
+                            {/* Lógica de Status do Modal (3 Estados) */}
+                            {(() => {
+                                if (!selectedIoT.status) {
+                                    return <p className="text-lg font-bold text-gray-400 uppercase">DESCONECTADO</p>;
+                                }
+                                const isOpen = selectedIoT.is_open || false;
+                                return (
+                                    <p className={`text-lg font-bold uppercase ${
+                                        isOpen ? 'text-red-600' : 'text-green-600'
+                                    }`}>
+                                        {isOpen ? 'ABERTO' : 'FECHADO'}
+                                    </p>
+                                );
+                            })()}
                         </div>
 
                         <div>
