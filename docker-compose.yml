@@ -117,7 +117,7 @@ services:
       - KONG_ADMIN_LISTEN=0.0.0.0:8001
       - KONG_ADMIN_GUI_URL=http://localhost:8002
     ports:
-      - "8000:8000"
+      - "80:8000"
       - "8001:8001"
       - "8002:8002"
     depends_on:
